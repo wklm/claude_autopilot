@@ -22,8 +22,14 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     exit 1
 fi
 
+# Get number of panes in agents window
+PANE_COUNT=$(tmux list-panes -t "$SESSION:agents" 2>/dev/null | wc -l)
+
 print_color "${CYAN}Claude Agent Farm Viewer${NC}\n"
 print_color "${CYAN}Session: $SESSION${NC}\n"
+if [ "$PANE_COUNT" -gt 0 ]; then
+    print_color "${CYAN}Agents: $PANE_COUNT${NC}\n"
+fi
 print_color "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 print_color "\n"
 print_color "1) Grid view    - See all agents at once\n"
@@ -31,8 +37,41 @@ print_color "2) Focus mode   - Cycle through individual agents\n"
 print_color "3) Split view   - Monitor dashboard + agents side by side\n"
 print_color "4) Quick attach - Jump right into the session\n"
 print_color "\n"
-print_color "${GREEN}Tip: Press Ctrl+B then D to detach${NC}\n"
+
+# Font size tips for many panes
+if [ "$PANE_COUNT" -ge 10 ]; then
+    print_color "${YELLOW}💡 Tip: With $PANE_COUNT panes, reduce font size for better visibility:${NC}\n"
+    print_color "   ${YELLOW}• macOS: Cmd + minus (-)${NC}\n"
+    print_color "   ${YELLOW}• Linux/Windows: Ctrl + minus (-)${NC}\n"
+    print_color "   ${YELLOW}• Reset: Cmd/Ctrl + 0${NC}\n"
+    print_color "\n"
+fi
+
+print_color "${GREEN}Navigation tips:${NC}\n"
+print_color "• Switch panes: Ctrl+B then arrow keys\n"
+print_color "• Zoom pane: Ctrl+B then Z\n"
+print_color "• Detach: Ctrl+B then D\n"
 print_color "\n"
+
+# Function to try adjusting terminal font size
+adjust_font_size() {
+    local action=$1
+    # These escape sequences work on some terminals
+    case "$action" in
+        "smaller")
+            # Try various terminal escape sequences for zooming out
+            printf '\033]50;-*-*-*-*-*-*-8-*-*-*-*-*-*-*\007' 2>/dev/null  # xterm
+            printf '\033]710;-*-fixed-medium-r-*-*-10-*-*-*-*-*-*-*\007' 2>/dev/null  # rxvt
+            print_color "${YELLOW}Attempted to reduce font size (may not work on all terminals)${NC}\n"
+            print_color "${YELLOW}Use your terminal's zoom out shortcut if needed${NC}\n"
+            ;;
+        "reset")
+            printf '\033]50;-*-*-*-*-*-*-12-*-*-*-*-*-*-*\007' 2>/dev/null
+            printf '\033]710;-*-fixed-medium-r-*-*-13-*-*-*-*-*-*-*\007' 2>/dev/null
+            print_color "${GREEN}Attempted to reset font size${NC}\n"
+            ;;
+    esac
+}
 
 # Portable prompt
 if [ -t 0 ]; then
@@ -47,6 +86,13 @@ case "$choice" in
     1)
         # Grid view - show all panes at once
         print_color "${GREEN}Entering grid view...${NC}\n"
+        
+        # Auto-adjust font for many panes
+        if [ "$PANE_COUNT" -ge 15 ]; then
+            adjust_font_size "smaller"
+            sleep 1
+        fi
+        
         tmux attach-session -t "$SESSION:agents"
         ;;
     2)

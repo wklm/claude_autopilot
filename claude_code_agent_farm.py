@@ -26,7 +26,7 @@ try:
     from rich.console import Console
     from rich.live import Live
     from rich.panel import Panel
-    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
     from rich.table import Table
 except ImportError:
     print("Please install required libraries: pip install typer rich")
@@ -36,6 +36,16 @@ app = typer.Typer(help="Claude Code Agent Farm - Parallel code fixing automation
 console = Console()
 
 # ─────────────────────────────── Configuration ────────────────────────────── #
+
+
+def interruptible_confirm(message: str, default: bool = False) -> bool:
+    """A confirm prompt that can be interrupted by Ctrl+C"""
+    try:
+        return typer.confirm(message, default=default)
+    except (KeyboardInterrupt, EOFError) as e:
+        console.print("\n[yellow]Confirmation interrupted[/yellow]")
+        raise KeyboardInterrupt() from e
+
 
 DEFAULT_PROMPT = textwrap.dedent("""\
     I need you to start going through combined_typechecker_and_linter_problems.txt (just pick random chunks of 50 lines at a time from anywhere within the file, starting with a random starting line; since I have multiple agents working on this task, I want each agent to work on different problems!)
@@ -88,7 +98,9 @@ def run(cmd: str, *, check: bool = True, quiet: bool = False, capture: bool = Fa
         stdout_pipe = subprocess.DEVNULL if quiet else None
         stderr_pipe = subprocess.DEVNULL if quiet else subprocess.STDOUT
         try:
-            result = subprocess.run(cmd_arg, shell=use_shell, check=check, stdout=stdout_pipe, stderr=stderr_pipe, text=True)
+            result = subprocess.run(
+                cmd_arg, shell=use_shell, check=check, stdout=stdout_pipe, stderr=stderr_pipe, text=True
+            )
             return result.returncode, "", ""
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Command failed with exit code {e.returncode}: {cmd}[/red]")
@@ -134,7 +146,7 @@ def tmux_send(target: str, data: str, enter: bool = True) -> None:
         except subprocess.CalledProcessError:
             if attempt < max_retries - 1:
                 # Exponential backoff: 0.5s, 1s, 2s
-                time.sleep(base_delay * (2 ** attempt))
+                time.sleep(base_delay * (2**attempt))
             else:
                 raise
 
@@ -163,10 +175,17 @@ class AgentMonitor:
     """Monitors Claude Code agents for health and performance"""
 
     def __init__(
-        self, session: str, num_agents: int, context_threshold: int = 20, idle_timeout: int = 60, max_errors: int = 3
+        self,
+        session: str,
+        num_agents: int,
+        pane_mapping: Dict[int, str],
+        context_threshold: int = 20,
+        idle_timeout: int = 60,
+        max_errors: int = 3,
     ):
         self.session = session
         self.num_agents = num_agents
+        self.pane_mapping = pane_mapping
         self.agents: Dict[int, Dict] = {}
         self.running = True
         self.start_time = datetime.now()
@@ -219,8 +238,14 @@ class AgentMonitor:
     def has_settings_error(self, content: str) -> bool:
         """Check for settings corruption"""
         error_indicators = [
-            "API key",
+            # Login/auth prompts
+            "Select login method:",
+            "Claude account with subscription",
+            "Sign in to Claude",
+            "Log in to Claude",
             "Enter your API key",
+            "API key",
+            # Configuration errors
             "Configuration error",
             "Settings corrupted",
             "Invalid API key",
@@ -230,12 +255,37 @@ class AgentMonitor:
             "Permission denied",
             "Failed to load configuration",
             "Invalid configuration",
+            "Error loading settings",
+            "Settings file is corrupted",
+            "Failed to parse settings",
+            "Invalid settings",
+            "Corrupted settings",
+            "Config corrupted",
+            "configuration is corrupted",
+            "Unable to load settings",
+            "Error reading settings",
+            "Settings error",
+            "config error",
+            # Parse errors
+            "TypeError",
+            "SyntaxError",
+            "JSONDecodeError",
+            "ParseError",
+            # Other login-related text
+            "Choose your login method",
+            "Continue with Claude account",
+            "I have a Claude account",
+            "Create account",
         ]
         return any(indicator in content for indicator in error_indicators)
 
     def check_agent(self, agent_id: int) -> Dict:
         """Check status of a single agent"""
-        pane_target = f"{self.session}:agents.{agent_id}"
+        pane_target = self.pane_mapping.get(agent_id)
+        if not pane_target:
+            console.print(f"[red]Error: No pane mapping found for agent {agent_id}[/red]")
+            return self.agents[agent_id]
+
         content = tmux_capture(pane_target)
 
         agent = self.agents[agent_id]
@@ -339,6 +389,7 @@ class ClaudeAgentFarm:
         max_errors: int = 3,
         tmux_kill_on_exit: bool = True,
         tmux_mouse: bool = True,
+        fast_start: bool = False,
     ):
         # Store all parameters
         self.path = path
@@ -359,12 +410,15 @@ class ClaudeAgentFarm:
         self.max_errors = max_errors
         self.tmux_kill_on_exit = tmux_kill_on_exit
         self.tmux_mouse = tmux_mouse
+        self.fast_start = fast_start
+
+        # Initialize pane mapping
+        self.pane_mapping: Dict[int, str] = {}
 
         # Validate session name (tmux has restrictions)
-        if not re.match(r'^[a-zA-Z0-9_-]+$', self.session):
+        if not re.match(r"^[a-zA-Z0-9_-]+$", self.session):
             raise ValueError(
-                f"Invalid tmux session name '{self.session}'. "
-                "Use only letters, numbers, hyphens, and underscores."
+                f"Invalid tmux session name '{self.session}'. Use only letters, numbers, hyphens, and underscores."
             )
 
         # Apply config file if provided
@@ -381,6 +435,7 @@ class ClaudeAgentFarm:
         self.prompt_text = self._load_prompt()
         self.monitor: Optional[AgentMonitor] = None
         self.running = True
+        self.shutting_down = False
 
         # Git settings from config
         self.git_branch: Optional[str] = getattr(self, "git_branch", None)
@@ -404,8 +459,10 @@ class ClaudeAgentFarm:
 
     def _signal_handler(self, sig: Any, frame: Any) -> None:
         """Handle shutdown signals gracefully"""
-        console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...[/yellow]")
-        self.running = False
+        if not self.shutting_down:
+            self.shutting_down = True
+            console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...[/yellow]")
+            self.running = False
 
     def _load_prompt(self) -> str:
         """Load prompt from file or use default"""
@@ -442,23 +499,31 @@ class ClaudeAgentFarm:
             with tempfile.NamedTemporaryFile(
                 mode="w", dir=self.project_path, prefix="combined_", suffix=".tmp", delete=False
             ) as tmpfile:
+                tmpfile_path = Path(tmpfile.name)
+
                 tmpfile.write("$ bun run type-check\n")
                 tmpfile.flush()
 
+                # Check if we should continue
+                if not self.running:
+                    tmpfile_path.unlink(missing_ok=True)
+                    raise KeyboardInterrupt()
+
                 # Run type-check
-                subprocess.run(["bun", "run", "type-check"],
-                              stdout=tmpfile, stderr=subprocess.STDOUT,
-                              cwd=self.project_path)
+                subprocess.run(
+                    ["bun", "run", "type-check"], stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path
+                )
 
                 tmpfile.write("\n\n$ bun run lint\n")
                 tmpfile.flush()
 
-                # Run lint
-                subprocess.run(["bun", "run", "lint"],
-                              stdout=tmpfile, stderr=subprocess.STDOUT,
-                              cwd=self.project_path)
+                # Check again before lint
+                if not self.running:
+                    tmpfile_path.unlink(missing_ok=True)
+                    raise KeyboardInterrupt()
 
-                tmpfile_path = Path(tmpfile.name)
+                # Run lint
+                subprocess.run(["bun", "run", "lint"], stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)
 
             # Atomic rename (handle cross-filesystem moves)
             try:
@@ -495,10 +560,13 @@ class ClaudeAgentFarm:
         # Check for uncommitted changes
         # First, check if the problems file exists and has changes
         if self.combined_file.exists():
-            ret, stdout, _ = run(f"git diff --name-only {shlex.quote(str(self.combined_file))}",
-                               capture=True, quiet=True)
+            ret, stdout, _ = run(
+                f"git diff --name-only {shlex.quote(str(self.combined_file))}", capture=True, quiet=True
+            )
             if stdout.strip():
-                console.print(f"[yellow]Warning: {self.combined_file.name} has uncommitted changes that will be committed[/yellow]")
+                console.print(
+                    f"[yellow]Warning: {self.combined_file.name} has uncommitted changes that will be committed[/yellow]"
+                )
 
         ret, stdout, _ = run("git status --porcelain", capture=True, quiet=True)
         if stdout.strip():
@@ -506,7 +574,7 @@ class ClaudeAgentFarm:
             console.print(stdout)
             console.print("[yellow]The agent farm will add and commit the problems file.[/yellow]")
             console.print("[yellow]Other uncommitted changes will remain uncommitted.[/yellow]")
-            if not typer.confirm("Do you want to continue?"):
+            if not interruptible_confirm("Do you want to continue?"):
                 raise typer.Exit(1)
 
         # Ensure we're on a branch (not detached HEAD)
@@ -543,6 +611,76 @@ class ClaudeAgentFarm:
         except subprocess.CalledProcessError:
             console.print("[yellow]⚠ git commit/push skipped (no changes?)")
 
+    def _wait_for_shell_prompt(self, pane_target: str, timeout: int = 30) -> bool:
+        """Wait for a shell prompt to appear in the pane"""
+        start_time = time.time()
+        last_content = ""
+        debug_shown = False
+
+        # Get the last part of the project path for detection
+        project_dir_name = self.project_path.name
+
+        while time.time() - start_time < timeout and self.running:
+            content = tmux_capture(pane_target)
+            if content and content != last_content:
+                lines = content.strip().splitlines()
+                if lines:
+                    # Only show debug output once per pane
+                    if not debug_shown and len(lines[-1]) > 0:
+                        console.print(f"[dim]Pane {pane_target}: ...{lines[-1][-50:]}[/dim]")
+                        debug_shown = True
+
+                    # Skip if direnv is still loading
+                    if any("direnv:" in line for line in lines[-3:]):
+                        continue  # Wait for direnv to finish
+
+                    # Check if we see the project directory in the prompt
+                    # This works with most modern shells that show the current directory
+                    # Look through ALL lines, not just the last few, since prompts can be complex
+                    for line in lines:
+                        if project_dir_name in line:
+                            console.print(f"[dim]Found project directory '{project_dir_name}' in prompt[/dim]")
+                            return True
+
+                    # Fall back to traditional prompt detection
+                    # Look for common shell prompt patterns at the end of the last line
+                    if re.search(r"[\$%>#]\s*$", lines[-1]):
+                        return True
+                    # Also check for other common prompt patterns
+                    if re.search(r"❯\s*$", lines[-1]):  # Starship/PowerLevel10k style  # noqa: RUF001
+                        return True
+                    if re.search(r"➜\s*$", lines[-1]):  # Oh-my-zsh default
+                        return True
+                    if re.search(r"\]\s*$", lines[-1]) and "[" in lines[-1]:  # Bracketed prompts
+                        return True
+                    # Check for git prompt patterns like "on main"
+                    if re.search(r"on\s+\S+.*\s*$", lines[-1]):  # Git branch info
+                        console.print("[dim]Detected git prompt pattern[/dim]")
+                        return True
+                last_content = content
+            time.sleep(0.2)
+
+        # Check if we were interrupted
+        if not self.running:
+            console.print("[yellow]Shell prompt check interrupted by shutdown signal[/yellow]")
+            return False
+
+        # Show final content if we timeout
+        if content:
+            lines = content.strip().splitlines()
+            if lines:
+                console.print(f"[yellow]Timeout waiting for prompt in {pane_target}[/yellow]")
+                console.print(f"[yellow]Last line: {lines[-1]}[/yellow]")
+                # Show more context to help debug
+                if len(lines) > 1:
+                    console.print("[dim]Previous lines:[/dim]")
+                    for line in lines[-5:-1]:  # Show up to 4 lines before the last
+                        console.print(f"[dim]  {line}[/dim]")
+        else:
+            console.print(f"[yellow]Timeout waiting for prompt in {pane_target}. No content captured.[/yellow]")
+
+        return False
+
     def setup_tmux_session(self) -> None:
         """Create tmux session with tiled agent panes"""
         console.rule(f"[yellow]Creating tmux session '{self.session}' with {self.agents} agents")
@@ -561,9 +699,108 @@ class ClaudeAgentFarm:
                 run(f"tmux split-window -t {self.session}:agents", quiet=True)
                 run(f"tmux select-layout -t {self.session}:agents tiled", quiet=True)
 
+        # Get the actual pane IDs - retry until we have the right count
+        console.print("[dim]Waiting for tmux panes to be created...[/dim]")
+        pane_ids = []
+        start_time = time.time()
+        timeout = 10  # 10 seconds max to create panes
+
+        while time.time() - start_time < timeout:
+            _, pane_list, _ = run(
+                f"tmux list-panes -t {self.session}:agents -F '#{{pane_index}}'", capture=True, quiet=True
+            )
+            pane_ids = [line.strip() for line in pane_list.strip().split("\n") if line.strip()]
+
+            if len(pane_ids) == self.agents:
+                break
+
+            time.sleep(0.1)
+
+        # Create mapping from agent ID to actual pane ID
+        if len(pane_ids) != self.agents:
+            console.print(f"[red]Error: Expected {self.agents} panes but found {len(pane_ids)}[/red]")
+            console.print(f"[red]Pane IDs found: {pane_ids}[/red]")
+            raise RuntimeError("Failed to create the expected number of tmux panes")
+
+        for agent_id, pane_id in enumerate(pane_ids[: self.agents]):
+            self.pane_mapping[agent_id] = f"{self.session}:agents.{pane_id}"
+
+        # Wait for all panes to have shell prompts ready
+        if not self.fast_start:
+            console.print("[dim]Waiting for shell prompts in all panes...[/dim]")
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                transient=True,
+            ) as progress:
+                task = progress.add_task("Initializing panes", total=self.agents)
+
+                for agent_id, pane_target in self.pane_mapping.items():
+                    if not self.running:
+                        console.print("[yellow]Initialization interrupted by shutdown signal[/yellow]")
+                        raise KeyboardInterrupt()
+
+                    if self._wait_for_shell_prompt(pane_target):
+                        progress.update(task, advance=1)
+                    else:
+                        console.print(f"[yellow]Warning: Pane {agent_id} slow to initialize[/yellow]")
+                        progress.update(task, advance=1)
+        else:
+            console.print("[dim]Fast start enabled - skipping shell prompt checks[/dim]")
+            # Just wait a moment for panes to settle
+            time.sleep(1.0)
+
         # Enable mouse support if configured
         if self.tmux_mouse:
             run(f"tmux set-option -t {self.session} -g mouse on", quiet=True)
+
+        # Automatically adjust font size for many panes
+        if self.agents >= 10:
+            console.print(f"[yellow]Optimizing display for {self.agents} panes...[/yellow]")
+
+            # Calculate zoom level needed
+            zoom_steps = 3 if self.agents >= 20 else 2 if self.agents >= 15 else 1
+
+            # If we're already in tmux, we can control the client zoom
+            if os.environ.get("TMUX"):
+                # We're in tmux - use client commands
+                for _ in range(zoom_steps):
+                    run("tmux resize-pane -Z", quiet=True, check=False)  # Toggle zoom
+                    run("tmux send-keys C--", quiet=True, check=False)  # Send Ctrl+-
+                    time.sleep(0.05)
+            else:
+                # Try to auto-zoom using escape sequences (works in some terminals)
+                # This will be ignored by terminals that don't support it
+                if sys.platform == "darwin":  # macOS
+                    # iTerm2 specific
+                    sys.stdout.write(f"\033]1337;SetProfile=FontSize={(14 - zoom_steps)}\007")
+                else:
+                    # Generic terminals - try zoom out escape sequence
+                    for _ in range(zoom_steps):
+                        sys.stdout.write("\033[1;2'-'")  # Some terminals recognize this
+                sys.stdout.flush()
+
+            # Optimize tmux display
+            run(f"tmux set-option -t {self.session} -g pane-border-style 'fg=colour240,bg=colour235'", quiet=True)
+            run(
+                f"tmux set-option -t {self.session} -g pane-active-border-style 'fg=colour250,bg=colour235'", quiet=True
+            )
+            run(f"tmux set-option -t {self.session} -g pane-border-lines single", quiet=True)
+            run(f"tmux set-option -t {self.session} -g pane-border-status off", quiet=True)
+
+            # Hide status bar to save space
+            run(f"tmux set-option -t {self.session} -g status off", quiet=True)
+
+            # Set aggressive resize for better space usage
+            run(f"tmux set-option -t {self.session} -g aggressive-resize on", quiet=True)
+
+            # If zoom didn't work automatically, remind user
+            console.print("[dim]If text is too large, zoom out with: Ctrl/Cmd + minus (-)[/dim]")
+            console.print(f"[dim]Zoom level suggested: {zoom_steps} step{'s' if zoom_steps > 1 else ''}[/dim]")
+
+            self._zoom_adjusted = True
 
         # Launch monitor in controller window if monitoring is enabled
         if not self.no_monitor:
@@ -584,19 +821,18 @@ class ClaudeAgentFarm:
 
     def start_agent(self, agent_id: int, restart: bool = False) -> None:
         """Start or restart a single agent"""
-        pane_target = f"{self.session}:agents.{agent_id}"
+        pane_target = self.pane_mapping.get(agent_id)
+        if not pane_target:
+            console.print(f"[red]Error: No pane mapping found for agent {agent_id}[/red]")
+            return
 
         if restart:
             # Exit current session
             tmux_send(pane_target, "/exit")
-            # Wait for shell prompt to appear (max 10 seconds - zsh with heavy plugins can be slow)
-            for _ in range(10):
-                time.sleep(1)
-                content = tmux_capture(pane_target)
-                # More robust prompt detection - look for common prompt endings
-                lines = content.strip().splitlines()
-                if lines and re.search(r'[\$%>#]\s*$', lines[-1]):
-                    break
+            # Wait for shell prompt to appear
+            if not self._wait_for_shell_prompt(pane_target, timeout=15):
+                console.print(f"[yellow]Warning: Agent {agent_id} pane slow to return to shell prompt[/yellow]")
+
             if self.monitor:
                 self.monitor.agents[agent_id]["cycles"] += 1
 
@@ -608,23 +844,59 @@ class ClaudeAgentFarm:
         if not restart:
             console.print(f"🛠  Agent {agent_id:02d}: launching cc, waiting {self.wait_after_cc}s...")
 
-        time.sleep(self.wait_after_cc)
+        # Make wait_after_cc interruptible
+        for _ in range(int(self.wait_after_cc * 5)):
+            if not self.running:
+                return
+            time.sleep(0.2)
 
         # Verify Claude Code started successfully
         max_retries = 3
+        claude_started_successfully = False
+
         for attempt in range(max_retries):
+            if not self.running:
+                return
+
             content = tmux_capture(pane_target)
-            if self.monitor and self.monitor.is_claude_ready(content):
-                break
+
+            # Check for various failure conditions
+            if not content or len(content.strip()) < 10:
+                # Empty or nearly empty content indicates cc didn't start
+                console.print(f"[yellow]Agent {agent_id:02d}: No output from Claude Code yet (attempt {attempt+1}/{max_retries})[/yellow]")
             elif self.monitor and self.monitor.has_settings_error(content):
-                console.print(f"[red]Agent {agent_id:02d}: Settings error detected[/red]")
+                console.print(f"[red]Agent {agent_id:02d}: Settings error/login prompt detected[/red]")
                 if self.monitor:
+                    self.monitor.agents[agent_id]["status"] = "error"
                     self.monitor.agents[agent_id]["errors"] += 1
                 return
+            elif "command not found" in content and "cc" in content:
+                # cc command doesn't exist
+                console.print(f"[red]Agent {agent_id:02d}: 'cc' command not found[/red]")
+                if self.monitor:
+                    self.monitor.agents[agent_id]["status"] = "error"
+                    self.monitor.agents[agent_id]["errors"] += 1
+                return
+            elif self.monitor and self.monitor.is_claude_ready(content):
+                claude_started_successfully = True
+                break
             elif attempt < max_retries - 1:
-                time.sleep(2)
+                # Make this sleep interruptible too
+                for _ in range(10):  # 2 seconds in 0.2s intervals
+                    if not self.running:
+                        return
+                    time.sleep(0.2)
             else:
-                console.print(f"[yellow]Agent {agent_id:02d}: Claude Code may not have started properly[/yellow]")
+                console.print(f"[red]Agent {agent_id:02d}: Claude Code failed to start properly after {max_retries} attempts[/red]")
+                if self.monitor:
+                    self.monitor.agents[agent_id]["status"] = "error"
+                    self.monitor.agents[agent_id]["errors"] += 1
+                return
+
+        # Only send prompt if Claude Code started successfully
+        if not claude_started_successfully:
+            console.print(f"[red]Agent {agent_id:02d}: Skipping prompt injection - Claude Code not ready[/red]")
+            return
 
         # Send prompt with unique seed for randomization
         seed = randint(100000, 999999)
@@ -655,13 +927,18 @@ class ClaudeAgentFarm:
 
         for i in range(self.agents):
             if not self.running:
+                console.print("[yellow]Agent launch interrupted by shutdown signal[/yellow]")
                 break
 
             self.start_agent(i)
 
             # Stagger starts to avoid config clobbering
-            if i < self.agents - 1:
-                time.sleep(self.stagger)
+            if i < self.agents - 1 and self.running:
+                # Use smaller sleep intervals to be more responsive to shutdown
+                for _ in range(int(self.stagger * 5)):
+                    if not self.running:
+                        break
+                    time.sleep(0.2)
 
     def monitor_loop(self) -> None:
         """Main monitoring loop with auto-restart capability"""
@@ -697,7 +974,9 @@ class ClaudeAgentFarm:
                                 if time_since_restart < backoff_time:
                                     continue  # Skip restart, still in backoff period
 
-                            console.print(f"[yellow]Restarting agent {agent_id} (attempt #{agent['restart_count'] + 1})...[/yellow]")
+                            console.print(
+                                f"[yellow]Restarting agent {agent_id} (attempt #{agent['restart_count'] + 1})...[/yellow]"
+                            )
                             self.start_agent(agent_id, restart=True)
 
                             # Update restart tracking
@@ -726,37 +1005,44 @@ class ClaudeAgentFarm:
             )
         )
 
-        # Execute workflow steps
-        self.regenerate_problems()
-        self.commit_and_push()
-        self.setup_tmux_session()
+        try:
+            # Execute workflow steps
+            self.regenerate_problems()
+            self.commit_and_push()
+            self.setup_tmux_session()
 
-        # Initialize monitor
-        self.monitor = AgentMonitor(
-            self.session,
-            self.agents,
-            context_threshold=self.context_threshold,
-            idle_timeout=self.idle_timeout,
-            max_errors=self.max_errors,
-        )
+            # Initialize monitor
+            self.monitor = AgentMonitor(
+                self.session,
+                self.agents,
+                self.pane_mapping,
+                context_threshold=self.context_threshold,
+                idle_timeout=self.idle_timeout,
+                max_errors=self.max_errors,
+            )
 
-        # Launch agents
-        self.launch_agents()
+            # Launch agents
+            self.launch_agents()
 
-        # Start monitoring
-        self.monitor_loop()
+            # Start monitoring
+            self.monitor_loop()
 
-        # Attach to session if requested
-        if self.attach and not self.no_monitor:
-            run(f"tmux attach-session -t {self.session}", check=False)
+            # Attach to session if requested
+            if self.attach and not self.no_monitor:
+                run(f"tmux attach-session -t {self.session}", check=False)
+
+        except KeyboardInterrupt:
+            # Don't print anything here - let the main handler deal with it
+            raise
 
     def shutdown(self) -> None:
         """Clean shutdown of all agents"""
         console.print("\n[yellow]Shutting down agents...[/yellow]")
 
         for i in range(self.agents):
-            pane_target = f"{self.session}:agents.{i}"
-            tmux_send(pane_target, "/exit")
+            pane_target = self.pane_mapping.get(i)
+            if pane_target:
+                tmux_send(pane_target, "/exit")
 
         time.sleep(2)
 
@@ -770,6 +1056,10 @@ class ClaudeAgentFarm:
         if hasattr(self, "state_file") and self.state_file.exists():
             self.state_file.unlink()
             console.print("[green]✓ Monitor state file cleaned up[/green]")
+
+        # Restore font size if we changed it
+        if hasattr(self, "_zoom_adjusted") and self._zoom_adjusted:
+            console.print("[dim]Note: You may want to restore zoom with Ctrl/Cmd + 0[/dim]")
 
     def _emergency_cleanup(self) -> None:
         """Emergency cleanup handler for unexpected exits"""
@@ -889,6 +1179,9 @@ def main(
     tmux_mouse: bool = typer.Option(
         True, "--tmux-mouse/--no-tmux-mouse", help="Enable tmux mouse support", rich_help_panel="Advanced Options"
     ),
+    fast_start: bool = typer.Option(
+        False, "--fast-start", help="Skip shell prompt checking", rich_help_panel="Advanced Options"
+    ),
 ) -> None:
     """
     Claude Code Agent Farm - Parallel code fixing automation
@@ -910,8 +1203,8 @@ def main(
 
     if agents > 50:
         console.print(f"[yellow]⚠ Running {agents} agents may consume significant resources[/yellow]")
-        if not typer.confirm("Do you want to continue?"):
-            raise typer.Exit(0)
+        if not interruptible_confirm("Do you want to continue?"):
+            raise KeyboardInterrupt()
 
     # Create and run the orchestrator
     farm = ClaudeAgentFarm(
@@ -933,6 +1226,7 @@ def main(
         max_errors=max_errors,
         tmux_kill_on_exit=tmux_kill_on_exit,
         tmux_mouse=tmux_mouse,
+        fast_start=fast_start,
     )
 
     try:
