@@ -144,6 +144,9 @@ def tmux_send(target: str, data: str, enter: bool = True) -> None:
             # Use tmux's literal mode (-l) to avoid quoting issues
             if data:
                 run(f"tmux send-keys -l -t {target} {shlex.quote(data)}", quiet=True)
+                # CRITICAL: Small delay between pasting and Enter for Claude Code
+                if enter:
+                    time.sleep(0.2)
             if enter:
                 run(f"tmux send-keys -t {target} C-m", quiet=True)
             break
@@ -914,36 +917,21 @@ class ClaudeAgentFarm:
         """Create tmux session with tiled agent panes"""
         console.rule(f"[yellow]Creating tmux session '{self.session}' with {self.agents} agents")
 
-        # Disable PowerLevel10K instant prompt to avoid errors in tmux panes
-        console.print("[dim]Disabling PowerLevel10K instant prompt...[/dim]")
-        p10k_config = Path.home() / ".p10k.zsh"
-        if p10k_config.exists():
-            try:
-                # Read the config file
-                content = p10k_config.read_text()
-                # Check if instant prompt is not already disabled
-                if "POWERLEVEL9K_INSTANT_PROMPT=off" not in content:
-                    # Add the setting at the beginning of the file
-                    new_content = "typeset -g POWERLEVEL9K_INSTANT_PROMPT=off\n" + content
-                    p10k_config.write_text(new_content)
-                    console.print("[green]✓ Disabled PowerLevel10K instant prompt[/green]")
-                else:
-                    console.print("[dim]PowerLevel10K instant prompt already disabled[/dim]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not disable P10K instant prompt: {e}[/yellow]")
-
         # Kill existing session if it exists
         run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
         time.sleep(0.5)
 
         # Create new session with controller window
         run(f"tmux new-session -d -s {self.session} -n controller")
-        run(f"tmux new-window -t {self.session} -n agents")
+        # CRITICAL: Set POWERLEVEL9K_INSTANT_PROMPT=off for ALL panes including the first one
+        run(f"tmux new-window -t {self.session} -n agents -e 'POWERLEVEL9K_INSTANT_PROMPT=off'", quiet=True)
 
         # Create agent panes in tiled layout
         for i in range(self.agents):
             if i > 0:
-                run(f"tmux split-window -t {self.session}:agents", quiet=True)
+                # CRITICAL: Set POWERLEVEL9K_INSTANT_PROMPT=off when creating the pane
+                # This ensures it's disabled BEFORE the shell initializes
+                run(f"tmux split-window -t {self.session}:agents -e 'POWERLEVEL9K_INSTANT_PROMPT=off'", quiet=True)
                 run(f"tmux select-layout -t {self.session}:agents tiled", quiet=True)
 
         # Get the actual pane IDs - retry until we have the right count
@@ -1161,13 +1149,10 @@ class ClaudeAgentFarm:
         # Quote the path so directories with spaces or shell metacharacters work
         tmux_send(pane_target, f"cd {shlex.quote(str(self.project_path))}")
         
-        # CRITICAL: Wait for cd to complete before launching cc
-        time.sleep(0.5)
-        
-        # Disable PowerLevel10K instant prompt for this specific pane's shell
-        # This prevents display corruption when launching cc
-        tmux_send(pane_target, "export POWERLEVEL9K_INSTANT_PROMPT=off")
-        time.sleep(0.1)
+        # CRITICAL: Wait a couple seconds for cd to complete and shell to stabilize
+        # This prevents race conditions and ensures we're in the right directory
+        console.print(f"[dim]Agent {agent_id:02d}: Waiting 2s after cd before launching cc...[/dim]")
+        time.sleep(2.0)
 
         # Acquire lock before launching cc to prevent config corruption
         lock_acquired = False
@@ -1316,11 +1301,6 @@ class ClaudeAgentFarm:
         if not claude_started_successfully:
             console.print(f"[red]Agent {agent_id:02d}: Skipping prompt injection - Claude Code not ready[/red]")
             return
-
-        # Additional delay to ensure Claude Code is fully ready to receive input
-        # Even though we detected it's "ready", it may still be initializing
-        console.print(f"[dim]Agent {agent_id:02d}: Waiting 3s for Claude Code to fully initialize...[/dim]")
-        time.sleep(3.0)
 
         # Send prompt with unique seed for randomization
         seed = randint(100000, 999999)
