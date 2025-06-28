@@ -60,6 +60,34 @@ detect_os() {
     fi
 }
 
+# Detect shell type and rc file
+detect_shell() {
+    local shell_type=""
+    local shell_rc=""
+    
+    if [ -n "${ZSH_VERSION:-}" ] || [ -n "${ZSH_NAME:-}" ]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [ -n "${BASH_VERSION:-}" ]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    elif [ -f "$HOME/.zshrc" ] && [[ "$SHELL" =~ zsh ]]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [ -f "$HOME/.bashrc" ] && [[ "$SHELL" =~ bash ]]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    elif [[ "$SHELL" =~ zsh ]]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [[ "$SHELL" =~ bash ]]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    fi
+    
+    echo "$shell_type|$shell_rc"
+}
+
 # Install tool based on OS
 install_tool() {
     local tool="$1"
@@ -136,7 +164,7 @@ check_requirements() {
     local tool_status=0
     
     # Check each tool
-    for tool in uv direnv tmux git bun; do
+    for tool in uv direnv tmux git bun claude; do
         if ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
@@ -151,6 +179,14 @@ check_requirements() {
     
     # Offer to install each missing tool
     for tool in "${missing_tools[@]}"; do
+        if [ "$tool" = "claude" ]; then
+            print_error "Claude Code CLI ('claude' command) is not installed"
+            print_warning "Please install Claude Code from: https://claude.ai/download"
+            print_warning "This tool is required for the agent farm to function"
+            tool_status=1
+            continue
+        fi
+        
         if prompt_yes_no "Would you like to install $tool?"; then
             if install_tool "$tool"; then
                 print_success "$tool installed successfully"
@@ -175,23 +211,11 @@ check_cc_status() {
     local cc_content=""
     
     # First check shell rc files for alias (more reliable than alias command)
-    local shell_rc=""
-    local shell_type=""
+    local shell_info=$(detect_shell)
+    local shell_type="${shell_info%|*}"
+    local shell_rc="${shell_info#*|}"
     
-    # Detect shell type more reliably
-    if [ -n "${ZSH_VERSION:-}" ]; then
-        shell_type="zsh"
-        shell_rc="$HOME/.zshrc"
-    elif [ -n "${BASH_VERSION:-}" ]; then
-        shell_type="bash"
-        shell_rc="$HOME/.bashrc"
-    elif [[ "$SHELL" =~ zsh ]]; then
-        shell_type="zsh"
-        shell_rc="$HOME/.zshrc"
-    elif [[ "$SHELL" =~ bash ]]; then
-        shell_type="bash"
-        shell_rc="$HOME/.bashrc"
-    else
+    if [ "$shell_type" = "" ]; then
         shell_type="unknown"
     fi
     
@@ -276,23 +300,11 @@ configure_cc_alias() {
     # Ask about persisting to shell rc file
     echo ""
     # Detect shell rc file
-    local shell_rc=""
-    local shell_type=""
+    local shell_info=$(detect_shell)
+    local shell_type="${shell_info%|*}"
+    local shell_rc="${shell_info#*|}"
     
-    # Detect shell type more reliably
-    if [ -n "${ZSH_VERSION:-}" ]; then
-        shell_type="zsh"
-        shell_rc="$HOME/.zshrc"
-    elif [ -n "${BASH_VERSION:-}" ]; then
-        shell_type="bash"
-        shell_rc="$HOME/.bashrc"
-    elif [[ "$SHELL" =~ zsh ]]; then
-        shell_type="zsh"
-        shell_rc="$HOME/.zshrc"
-    elif [[ "$SHELL" =~ bash ]]; then
-        shell_type="bash"
-        shell_rc="$HOME/.bashrc"
-    else
+    if [ "$shell_type" = "" ] || [ "$shell_type" = "unknown" ]; then
         print_warning "Could not detect shell type. Please add the alias manually to your shell rc file."
         return
     fi

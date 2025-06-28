@@ -108,10 +108,10 @@ This is the main orchestrator that does all the heavy lifting:
 - **Launches Claude Code agents** in each tmux pane
 - **Monitors agent health** (context usage, work status, errors)
 - **Auto-restarts agents** when they complete tasks or hit issues
-- **Displays real-time dashboard** showing all agent statuses
+- **Runs monitoring dashboard** in the tmux controller window
 - **Handles graceful shutdown** with Ctrl+C
 
-**You run this script and it stays running** (unless using `--no-monitor` mode).
+**You run this script and it stays running** (unless using `--no-monitor` mode). The monitoring dashboard is displayed in the tmux session's controller window, not in the launching terminal.
 
 #### 2. **Shell Script** (`view_agents.sh`) - The Window 🪟
 
@@ -167,8 +167,8 @@ claude-agent-farm --path /your/project --config configs/production.json
 
 While the orchestrator is running, you have several options:
 
-#### Option 1: Built-in Monitoring Dashboard (Default)
-The Python script shows a real-time status table:
+#### Option 1: Built-in Monitoring Dashboard
+The monitoring dashboard now runs inside the tmux controller window, allowing you to see both the dashboard and agents in the same tmux session:
 
 ```
 Claude Agent Farm - 14:32:15
@@ -181,6 +181,10 @@ Claude Agent Farm - 14:32:15
 └──────────┴────────────┴────────┴──────────┴──────────────┴────────┘
 ```
 
+To view it:
+- `tmux attach -t claude_agents:controller` - View monitoring dashboard
+- Use the viewer script (Option 2) for convenient split views
+
 #### Option 2: Tmux Viewer Script
 In a separate terminal:
 
@@ -191,7 +195,7 @@ In a separate terminal:
 Choose from:
 1. **Grid view** - See all agents at once
 2. **Focus mode** - Navigate between individual agents
-3. **Split view** - Controller + agents side by side
+3. **Split view** - Monitor dashboard + agents side by side (recommended!)
 4. **Quick attach** - Direct tmux attachment
 
 #### Option 3: Direct tmux Commands
@@ -425,6 +429,7 @@ claude_code_agent_farm/
 ├── claude_code_agent_farm.py   # Main orchestrator (Python)
 ├── view_agents.sh               # Tmux viewer utility (Bash)
 ├── setup.sh                     # Automated setup script
+├── __init__.py                  # Python package file
 ├── pyproject.toml              # Project configuration
 ├── .envrc                      # Direnv configuration
 ├── configs/                    # Configuration files

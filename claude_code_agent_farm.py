@@ -5,6 +5,7 @@ Combines simplicity with robust monitoring and automatic agent management
 """
 
 import contextlib
+import fcntl
 import json
 import os
 import re
@@ -31,10 +32,7 @@ except ImportError:
     print("Please install required libraries: pip install typer rich")
     sys.exit(1)
 
-app = typer.Typer(
-    help="Claude Code Agent Farm - Parallel code fixing automation",
-    rich_markup_mode="rich"
-)
+app = typer.Typer(help="Claude Code Agent Farm - Parallel code fixing automation", rich_markup_mode="rich")
 console = Console()
 
 # ─────────────────────────────── Configuration ────────────────────────────── #
@@ -53,7 +51,12 @@ DEFAULT_PROMPT = textwrap.dedent("""\
     When you're done fixing the entire batch of selected problems, you can commit your progress to git with a detailed commit message (but don't go overboard making the commit message super long). Try to complete as much work as possible before coming back to me for more instructions-- what I've already asked you to do should keep you very busy for a while!
 """)
 
+# ─────────────────────────────── Constants ────────────────────────────────── #
+
+MONITOR_STATE_FILE = ".claude_agent_farm_state.json"
+
 # ─────────────────────────────── Helper Functions ─────────────────────────── #
+
 
 def run(cmd: str, *, check: bool = True, quiet: bool = False, capture: bool = False) -> Tuple[int, str, str]:
     """Execute shell command with optional output capture
@@ -64,16 +67,30 @@ def run(cmd: str, *, check: bool = True, quiet: bool = False, capture: bool = Fa
     if not quiet:
         console.log(cmd, style="cyan")
 
+    # Parse command for shell safety when possible
+    try:
+        # Try to parse as a list of arguments for safer execution
+        cmd_list = shlex.split(cmd)
+        use_shell = False
+    except ValueError:
+        # Fall back to shell=True for complex commands with pipes, redirects, etc.
+        cmd_list = cmd
+        use_shell = True
+
     if capture:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=check)
+        result = subprocess.run(cmd_list, shell=use_shell, capture_output=True, text=True, check=check)
         return result.returncode, result.stdout or "", result.stderr or ""
     else:
         # Stream output to terminal when not capturing
         stdout_pipe = subprocess.DEVNULL if quiet else None
         stderr_pipe = subprocess.DEVNULL if quiet else subprocess.STDOUT
-        result = subprocess.run(cmd, shell=True, check=check,
-                              stdout=stdout_pipe, stderr=stderr_pipe, text=True)
-        return result.returncode, "", ""
+        try:
+            result = subprocess.run(cmd_list, shell=use_shell, check=check, stdout=stdout_pipe, stderr=stderr_pipe, text=True)
+            return result.returncode, "", ""
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Command failed with exit code {e.returncode}: {cmd}[/red]")
+            raise
+
 
 def line_count(file_path: Path) -> int:
     """Count lines in a file"""
@@ -89,10 +106,11 @@ def line_count(file_path: Path) -> int:
         console.print(f"[yellow]Warning: Could not count lines in {file_path}: {e}[/yellow]")
         return 0
 
+
 def tmux_send(target: str, data: str, enter: bool = True) -> None:
     """Send keystrokes to a tmux pane (binary-safe)"""
     max_retries = 3
-    retry_delay = 0.5
+    base_delay = 0.5
 
     for attempt in range(max_retries):
         try:
@@ -104,24 +122,38 @@ def tmux_send(target: str, data: str, enter: bool = True) -> None:
             break
         except subprocess.CalledProcessError:
             if attempt < max_retries - 1:
-                time.sleep(retry_delay)
+                # Exponential backoff: 0.5s, 1s, 2s
+                time.sleep(base_delay * (2 ** attempt))
             else:
                 raise
 
+
 def tmux_capture(target: str) -> str:
     """Capture content from a tmux pane"""
-    _, stdout, _ = run(f"tmux capture-pane -t {target} -p", quiet=True, capture=True)
-    return stdout
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            _, stdout, _ = run(f"tmux capture-pane -t {target} -p", quiet=True, capture=True)
+            return stdout
+        except subprocess.CalledProcessError:
+            if attempt < max_retries - 1:
+                time.sleep(0.2)
+            else:
+                # Return empty string on persistent failure
+                return ""
+    return ""
+
 
 # ─────────────────────────────── Agent Monitor ────────────────────────────── #
+
 
 class AgentMonitor:
     """Monitors Claude Code agents for health and performance"""
 
-    def __init__(self, session: str, num_agents: int,
-                 context_threshold: int = 20,
-                 idle_timeout: int = 60,
-                 max_errors: int = 3):
+    def __init__(
+        self, session: str, num_agents: int, context_threshold: int = 20, idle_timeout: int = 60, max_errors: int = 3
+    ):
         self.session = session
         self.num_agents = num_agents
         self.agents: Dict[int, Dict] = {}
@@ -134,23 +166,27 @@ class AgentMonitor:
         # Initialize agent tracking
         for i in range(num_agents):
             self.agents[i] = {
-                'status': 'starting',
-                'start_time': datetime.now(),
-                'cycles': 0,
-                'last_context': 100,
-                'errors': 0,
-                'last_activity': datetime.now()
+                "status": "starting",
+                "start_time": datetime.now(),
+                "cycles": 0,
+                "last_context": 100,
+                "errors": 0,
+                "last_activity": datetime.now(),
             }
 
     def detect_context_percentage(self, content: str) -> Optional[int]:
         """Extract context percentage from pane content"""
         # Try multiple patterns for robustness
         patterns = [
-            r'Context left until\s*auto-compact:\s*(\d+)%',
-            r'Context remaining:\s*(\d+)%',
-            r'(\d+)%\s*context\s*remaining',
-            r'Context:\s*(\d+)%'
+            r"Context left until\s*auto-compact:\s*(\d+)%",
+            r"Context remaining:\s*(\d+)%",
+            r"(\d+)%\s*context\s*remaining",
+            r"Context:\s*(\d+)%",
         ]
+
+        # Safety check for empty content
+        if not content:
+            return None
 
         for pattern in patterns:
             match = re.search(pattern, content, re.IGNORECASE)
@@ -160,20 +196,27 @@ class AgentMonitor:
 
     def is_claude_ready(self, content: str) -> bool:
         """Check if Claude Code is ready for input"""
-        return bool('│ >' in content and 'for shortcuts' in content)
+        return bool("│ >" in content and "for shortcuts" in content)
 
     def is_claude_working(self, content: str) -> bool:
         """Check if Claude Code is actively working"""
-        indicators = ['✻ Pontificating', '● Bash(', '✻ Running', '✻ Thinking', 'esc to interrupt']
+        indicators = ["✻ Pontificating", "● Bash(", "✻ Running", "✻ Thinking", "esc to interrupt"]
         return any(indicator in content for indicator in indicators)
 
     def has_settings_error(self, content: str) -> bool:
         """Check for settings corruption"""
         error_indicators = [
-            'API key', 'Enter your API key', 'Configuration error',
-            'Settings corrupted', 'Invalid API key', 'Authentication failed',
-            'Rate limit exceeded', 'Unauthorized', 'Permission denied',
-            'Failed to load configuration', 'Invalid configuration'
+            "API key",
+            "Enter your API key",
+            "Configuration error",
+            "Settings corrupted",
+            "Invalid API key",
+            "Authentication failed",
+            "Rate limit exceeded",
+            "Unauthorized",
+            "Permission denied",
+            "Failed to load configuration",
+            "Invalid configuration",
         ]
         return any(indicator in content for indicator in error_indicators)
 
@@ -187,27 +230,27 @@ class AgentMonitor:
         # Update context percentage
         context = self.detect_context_percentage(content)
         if context is not None:
-            agent['last_context'] = context
+            agent["last_context"] = context
 
         # Check for errors
         if self.has_settings_error(content):
-            agent['status'] = 'error'
-            agent['errors'] += 1
+            agent["status"] = "error"
+            agent["errors"] += 1
             return agent
 
         # Update status based on activity
         if self.is_claude_working(content):
-            agent['status'] = 'working'
-            agent['last_activity'] = datetime.now()
+            agent["status"] = "working"
+            agent["last_activity"] = datetime.now()
         elif self.is_claude_ready(content):
             # Check if idle for too long
-            idle_time = (datetime.now() - agent['last_activity']).total_seconds()
+            idle_time = (datetime.now() - agent["last_activity"]).total_seconds()
             if idle_time > self.idle_timeout:
-                agent['status'] = 'idle'
+                agent["status"] = "idle"
             else:
-                agent['status'] = 'ready'
+                agent["status"] = "ready"
         else:
-            agent['status'] = 'unknown'
+            agent["status"] = "unknown"
 
         return agent
 
@@ -217,10 +260,10 @@ class AgentMonitor:
 
         # Restart conditions
         return bool(
-            agent['status'] == 'error' or
-            agent['errors'] >= self.max_errors or
-            agent['status'] == 'idle' or
-            agent['last_context'] <= self.context_threshold
+            agent["status"] == "error"
+            or agent["errors"] >= self.max_errors
+            or agent["status"] == "idle"
+            or agent["last_context"] <= self.context_threshold
         )
 
     def get_status_table(self) -> Table:
@@ -236,51 +279,54 @@ class AgentMonitor:
 
         for agent_id in sorted(self.agents.keys()):
             agent = self.agents[agent_id]
-            runtime = str(datetime.now() - agent['start_time']).split('.')[0]
+            runtime = str(datetime.now() - agent["start_time"]).split(".")[0]
 
             status_style = {
-                'working': '[green]',
-                'ready': '[cyan]',
-                'idle': '[yellow]',
-                'error': '[red]',
-                'starting': '[yellow]',
-                'unknown': '[dim]'
-            }.get(agent['status'], '')
+                "working": "[green]",
+                "ready": "[cyan]",
+                "idle": "[yellow]",
+                "error": "[red]",
+                "starting": "[yellow]",
+                "unknown": "[dim]",
+            }.get(agent["status"], "")
 
             table.add_row(
                 f"Pane {agent_id:02d}",
                 f"{status_style}{agent['status']}[/]",
-                str(agent['cycles']),
+                str(agent["cycles"]),
                 f"{agent['last_context']}%",
                 runtime,
-                str(agent['errors'])
+                str(agent["errors"]),
             )
 
         return table
 
+
 # ─────────────────────────────── Main Orchestrator ────────────────────────── #
 
-class ClaudeAgentFarm:
-    def __init__(self,
-                 path: str,
-                 agents: int = 20,
-                 session: str = "claude_agents",
-                 stagger: float = 4.0,
-                 wait_after_cc: float = 3.0,
-                 check_interval: int = 10,
-                 skip_regenerate: bool = False,
-                 skip_commit: bool = False,
-                 auto_restart: bool = False,
-                 no_monitor: bool = False,
-                 attach: bool = False,
-                 prompt_file: Optional[str] = None,
-                 config: Optional[str] = None,
-                 context_threshold: int = 20,
-                 idle_timeout: int = 60,
-                 max_errors: int = 3,
-                 tmux_kill_on_exit: bool = True,
-                 tmux_mouse: bool = True):
 
+class ClaudeAgentFarm:
+    def __init__(
+        self,
+        path: str,
+        agents: int = 20,
+        session: str = "claude_agents",
+        stagger: float = 4.0,
+        wait_after_cc: float = 3.0,
+        check_interval: int = 10,
+        skip_regenerate: bool = False,
+        skip_commit: bool = False,
+        auto_restart: bool = False,
+        no_monitor: bool = False,
+        attach: bool = False,
+        prompt_file: Optional[str] = None,
+        config: Optional[str] = None,
+        context_threshold: int = 20,
+        idle_timeout: int = 60,
+        max_errors: int = 3,
+        tmux_kill_on_exit: bool = True,
+        tmux_mouse: bool = True,
+    ):
         # Store all parameters
         self.path = path
         self.agents = agents
@@ -306,7 +352,7 @@ class ClaudeAgentFarm:
             self._load_config(config)
 
         # Validate agent count
-        if self.agents > getattr(self, 'max_agents', 50):
+        if self.agents > getattr(self, "max_agents", 50):
             raise ValueError(f"Agent count {self.agents} exceeds maximum {getattr(self, 'max_agents', 50)}")
 
         # Initialize other attributes
@@ -317,9 +363,10 @@ class ClaudeAgentFarm:
         self.running = True
 
         # Git settings from config
-        self.git_branch: Optional[str] = getattr(self, 'git_branch', None)
-        self.git_remote: str = getattr(self, 'git_remote', 'origin')
+        self.git_branch: Optional[str] = getattr(self, "git_branch", None)
+        self.git_remote: str = getattr(self, "git_remote", "origin")
         self._cleanup_registered = False
+        self.state_file = self.project_path / MONITOR_STATE_FILE
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -331,10 +378,9 @@ class ClaudeAgentFarm:
         if config_file.exists():
             with config_file.open() as f:
                 config_data = json.load(f)
-                # Update instance attributes with config values
+                # Accept all config values, not just existing attributes
                 for key, value in config_data.items():
-                    if hasattr(self, key):
-                        setattr(self, key, value)
+                    setattr(self, key, value)
 
     def _signal_handler(self, sig: Any, frame: Any) -> None:
         """Handle shutdown signals gracefully"""
@@ -373,22 +419,20 @@ class ClaudeAgentFarm:
             os.chdir(self.project_path)
 
             # Use a proper temporary file to avoid conflicts
-            with tempfile.NamedTemporaryFile(mode='w', dir=self.project_path,
-                                            prefix='combined_', suffix='.tmp',
-                                            delete=False) as tmpfile:
+            with tempfile.NamedTemporaryFile(
+                mode="w", dir=self.project_path, prefix="combined_", suffix=".tmp", delete=False
+            ) as tmpfile:
                 tmpfile.write("$ bun run type-check\n")
                 tmpfile.flush()
 
                 # Run type-check
-                subprocess.run("bun run type-check", shell=True,
-                               stdout=tmpfile, stderr=subprocess.STDOUT)
+                subprocess.run("bun run type-check", shell=True, stdout=tmpfile, stderr=subprocess.STDOUT)
 
                 tmpfile.write("\n\n$ bun run lint\n")
                 tmpfile.flush()
 
                 # Run lint
-                subprocess.run("bun run lint", shell=True,
-                               stdout=tmpfile, stderr=subprocess.STDOUT)
+                subprocess.run("bun run lint", shell=True, stdout=tmpfile, stderr=subprocess.STDOUT)
 
                 tmpfile_path = Path(tmpfile.name)
 
@@ -398,6 +442,7 @@ class ClaudeAgentFarm:
             except OSError:
                 # Fallback for cross-filesystem scenarios
                 import shutil
+
                 shutil.move(str(tmpfile_path), str(self.combined_file))
             finally:
                 # Clean up temp file if it still exists
@@ -423,11 +468,37 @@ class ClaudeAgentFarm:
             console.print("[yellow]Skipping git operations[/yellow]")
             return
 
+        # Check for uncommitted changes
+        ret, stdout, _ = run("git status --porcelain", capture=True, quiet=True)
+        if stdout.strip():
+            console.print("[yellow]You have uncommitted changes:[/yellow]")
+            console.print(stdout)
+            console.print("[yellow]The agent farm will add and commit the problems file.[/yellow]")
+            console.print("[yellow]Other uncommitted changes will remain uncommitted.[/yellow]")
+            if not typer.confirm("Do you want to continue?"):
+                raise typer.Exit(1)
+
+        # Ensure we're on a branch (not detached HEAD)
+        ret, stdout, _ = run("git symbolic-ref HEAD", capture=True, quiet=True, check=False)
+        if ret != 0:
+            console.print("[red]Error: You're in a detached HEAD state[/red]")
+            console.print("[yellow]Please checkout a branch before running the agent farm[/yellow]")
+            raise typer.Exit(1)
+
         count = line_count(self.combined_file)
 
         try:
             run(f"git add {shlex.quote(str(self.combined_file))}")
-            run(f"git commit -m 'Before next round of fixes; currently {count} lines of problems'", check=False)
+
+            # Capture commit output to check if anything was actually committed
+            commit_cmd = ["git", "commit", "-m", f"Before next round of fixes; currently {count} lines of problems"]
+            commit_result = subprocess.run(commit_cmd, capture_output=True, text=True)
+
+            if commit_result.returncode != 0:  # noqa: SIM102
+                if "nothing to commit" in commit_result.stdout or "no changes added" in commit_result.stdout:
+                    console.print("[yellow]No changes to commit - skipping push[/yellow]")
+                    return
+                # Other errors still show warning below
 
             # Determine branch and remote
             branch = self.git_branch
@@ -463,9 +534,18 @@ class ClaudeAgentFarm:
         if self.tmux_mouse:
             run(f"tmux set-option -t {self.session} -g mouse on", quiet=True)
 
+        # Launch monitor in controller window if monitoring is enabled
+        if not self.no_monitor:
+            # Get the current script path
+            script_path = Path(__file__).resolve()
+            # Launch monitor mode in controller pane
+            monitor_cmd = f"cd {self.project_path} && {sys.executable} {script_path} monitor-only --path {self.project_path} --session {self.session}"
+            tmux_send(f"{self.session}:controller", monitor_cmd)
+
         # Register cleanup handler
         if not self._cleanup_registered:
             import atexit
+
             atexit.register(self._emergency_cleanup)
             self._cleanup_registered = True
 
@@ -485,7 +565,7 @@ class ClaudeAgentFarm:
                 if "$" in content or "%" in content or ">" in content:
                     break
             if self.monitor:
-                self.monitor.agents[agent_id]['cycles'] += 1
+                self.monitor.agents[agent_id]["cycles"] += 1
 
         # Navigate and start Claude Code
         tmux_send(pane_target, f"cd {self.project_path}")
@@ -496,6 +576,22 @@ class ClaudeAgentFarm:
 
         time.sleep(self.wait_after_cc)
 
+        # Verify Claude Code started successfully
+        max_retries = 3
+        for attempt in range(max_retries):
+            content = tmux_capture(pane_target)
+            if self.monitor and self.monitor.is_claude_ready(content):
+                break
+            elif self.monitor and self.monitor.has_settings_error(content):
+                console.print(f"[red]Agent {agent_id:02d}: Settings error detected[/red]")
+                if self.monitor:
+                    self.monitor.agents[agent_id]["errors"] += 1
+                return
+            elif attempt < max_retries - 1:
+                time.sleep(2)
+            else:
+                console.print(f"[yellow]Agent {agent_id:02d}: Claude Code may not have started properly[/yellow]")
+
         # Send prompt with unique seed for randomization
         seed = randint(100000, 999999)
         # Use regex to handle variations like "random chunks of 50 lines"
@@ -504,7 +600,7 @@ class ClaudeAgentFarm:
             lambda m: f"{m.group(0)} (instance-seed {seed})",
             self.prompt_text,
             count=1,
-            flags=re.IGNORECASE
+            flags=re.IGNORECASE,
         )
 
         # Send prompt line by line
@@ -516,8 +612,8 @@ class ClaudeAgentFarm:
             console.print(f"[green]✓ Agent {agent_id:02d}: prompt injected[/green]")
 
         if self.monitor:
-            self.monitor.agents[agent_id]['status'] = 'starting'
-            self.monitor.agents[agent_id]['last_activity'] = datetime.now()
+            self.monitor.agents[agent_id]["status"] = "starting"
+            self.monitor.agents[agent_id]["last_activity"] = datetime.now()
 
     def launch_agents(self) -> None:
         """Launch all agents with staggered start times"""
@@ -541,40 +637,45 @@ class ClaudeAgentFarm:
             return
 
         console.rule("[green]All agents launched - Monitoring active")
-        console.print("[dim]Press Ctrl+C for graceful shutdown[/dim]\n")
+        console.print("[yellow]Monitor dashboard running in tmux controller window[/yellow]")
+        console.print(f"[cyan]View with: tmux attach -t {self.session}:controller[/cyan]")
+        console.print("[cyan]Or use: ./view_agents.sh[/cyan]")
+        console.print("[dim]Press Ctrl+C here for graceful shutdown[/dim]\n")
 
         if self.monitor:
-            with Live(self.monitor.get_status_table(), refresh_per_second=1) as live:
-                check_counter = 0
+            check_counter = 0
 
-                while self.running:
-                    # Check agents every N seconds
-                    if check_counter % self.check_interval == 0:
-                        for agent_id in range(self.agents):
-                            self.monitor.check_agent(agent_id)
+            while self.running:
+                # Check agents every N seconds
+                if check_counter % self.check_interval == 0:
+                    for agent_id in range(self.agents):
+                        self.monitor.check_agent(agent_id)
 
-                            # Auto-restart if needed
-                            if self.auto_restart and self.monitor.needs_restart(agent_id):
-                                console.print(f"\n[yellow]Restarting agent {agent_id}...[/yellow]")
-                                self.start_agent(agent_id, restart=True)
+                        # Auto-restart if needed
+                        if self.auto_restart and self.monitor.needs_restart(agent_id):
+                            console.print(f"[yellow]Restarting agent {agent_id}...[/yellow]")
+                            self.start_agent(agent_id, restart=True)
 
-                    live.update(self.monitor.get_status_table())
-                    time.sleep(1)
-                    check_counter += 1
+                # Write state to file for monitor process
+                self.write_monitor_state()
+                time.sleep(1)
+                check_counter += 1
 
     def run(self) -> None:
         """Main orchestration flow"""
         os.chdir(self.project_path)
 
         # Display startup banner
-        console.print(Panel.fit(
-            f"[bold cyan]Claude Code Agent Farm[/bold cyan]\n"
-            f"Project: {self.project_path}\n"
-            f"Agents: {self.agents}\n"
-            f"Session: {self.session}\n"
-            f"Auto-restart: {'enabled' if self.auto_restart else 'disabled'}",
-            border_style="cyan"
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold cyan]Claude Code Agent Farm[/bold cyan]\n"
+                f"Project: {self.project_path}\n"
+                f"Agents: {self.agents}\n"
+                f"Session: {self.session}\n"
+                f"Auto-restart: {'enabled' if self.auto_restart else 'disabled'}",
+                border_style="cyan",
+            )
+        )
 
         # Execute workflow steps
         self.regenerate_problems()
@@ -583,10 +684,12 @@ class ClaudeAgentFarm:
 
         # Initialize monitor
         self.monitor = AgentMonitor(
-            self.session, self.agents,
+            self.session,
+            self.agents,
             context_threshold=self.context_threshold,
             idle_timeout=self.idle_timeout,
-            max_errors=self.max_errors)
+            max_errors=self.max_errors,
+        )
 
         # Launch agents
         self.launch_agents()
@@ -614,124 +717,128 @@ class ClaudeAgentFarm:
         else:
             console.print("[yellow]tmux left running (tmux_kill_on_exit = false)[/yellow]")
 
+        # Clean up state file
+        if hasattr(self, "state_file") and self.state_file.exists():
+            self.state_file.unlink()
+            console.print("[green]✓ Monitor state file cleaned up[/green]")
+
     def _emergency_cleanup(self) -> None:
         """Emergency cleanup handler for unexpected exits"""
         with contextlib.suppress(Exception):
             # Kill the tmux session if it exists
             run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
+            # Clean up state file
+            if hasattr(self, "state_file") and self.state_file.exists():
+                self.state_file.unlink()
+
+    def write_monitor_state(self) -> None:
+        """Write current monitor state to shared file"""
+        if not self.monitor:
+            return
+
+        def _serialise_agent(a: dict) -> dict:
+            """Convert datetime objects to ISO strings for JSON serialization"""
+            return {
+                **a,
+                "start_time": a["start_time"].isoformat(),
+                "last_activity": a["last_activity"].isoformat(),
+            }
+
+        state_data = {
+            "session": self.session,
+            "num_agents": self.agents,
+            "agents": {str(k): _serialise_agent(v) for k, v in self.monitor.agents.items()},
+            "start_time": self.monitor.start_time.isoformat(),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        # Write atomically with file locking
+        tmp_file = self.state_file.with_suffix(".tmp")
+        try:
+            with tmp_file.open("w") as f:
+                # Acquire exclusive lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    json.dump(state_data, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                finally:
+                    # Release lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            # Atomic rename
+            tmp_file.replace(self.state_file)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not write monitor state: {e}[/yellow]")
+            tmp_file.unlink(missing_ok=True)
+
 
 # ─────────────────────────────── CLI Entry Point ──────────────────────────── #
 
+
 @app.command()
 def main(
-    path: str = typer.Option(
-        ...,
-        "--path",
-        help="Absolute path to project root",
-        rich_help_panel="Required Arguments"
-    ),
+    path: str = typer.Option(..., "--path", help="Absolute path to project root", rich_help_panel="Required Arguments"),
     agents: int = typer.Option(
-        20,
-        "--agents", "-n",
-        help="Number of Claude agents",
-        rich_help_panel="Agent Configuration"
+        20, "--agents", "-n", help="Number of Claude agents", rich_help_panel="Agent Configuration"
     ),
     session: str = typer.Option(
-        "claude_agents",
-        "--session", "-s",
-        help="tmux session name",
-        rich_help_panel="Agent Configuration"
+        "claude_agents", "--session", "-s", help="tmux session name", rich_help_panel="Agent Configuration"
     ),
     stagger: float = typer.Option(
-        4.0,
-        "--stagger",
-        help="Seconds between starting agents",
-        rich_help_panel="Timing Configuration"
+        4.0, "--stagger", help="Seconds between starting agents", rich_help_panel="Timing Configuration"
     ),
     wait_after_cc: float = typer.Option(
-        3.0,
-        "--wait-after-cc",
-        help="Seconds to wait after launching cc",
-        rich_help_panel="Timing Configuration"
+        3.0, "--wait-after-cc", help="Seconds to wait after launching cc", rich_help_panel="Timing Configuration"
     ),
     check_interval: int = typer.Option(
-        10,
-        "--check-interval",
-        help="Seconds between agent health checks",
-        rich_help_panel="Timing Configuration"
+        10, "--check-interval", help="Seconds between agent health checks", rich_help_panel="Timing Configuration"
     ),
     skip_regenerate: bool = typer.Option(
-        False,
-        "--skip-regenerate",
-        help="Skip regenerating problems file",
-        rich_help_panel="Feature Flags"
+        False, "--skip-regenerate", help="Skip regenerating problems file", rich_help_panel="Feature Flags"
     ),
     skip_commit: bool = typer.Option(
-        False,
-        "--skip-commit",
-        help="Skip git commit/push",
-        rich_help_panel="Feature Flags"
+        False, "--skip-commit", help="Skip git commit/push", rich_help_panel="Feature Flags"
     ),
     auto_restart: bool = typer.Option(
-        False,
-        "--auto-restart",
-        help="Auto-restart agents on errors/completion",
-        rich_help_panel="Feature Flags"
+        False, "--auto-restart", help="Auto-restart agents on errors/completion", rich_help_panel="Feature Flags"
     ),
     no_monitor: bool = typer.Option(
-        False,
-        "--no-monitor",
-        help="Disable monitoring (just launch and exit)",
-        rich_help_panel="Feature Flags"
+        False, "--no-monitor", help="Disable monitoring (just launch and exit)", rich_help_panel="Feature Flags"
     ),
     attach: bool = typer.Option(
-        False,
-        "--attach",
-        help="Attach to tmux session after setup",
-        rich_help_panel="Feature Flags"
+        False, "--attach", help="Attach to tmux session after setup", rich_help_panel="Feature Flags"
     ),
     prompt_file: Optional[str] = typer.Option(
-        None,
-        "--prompt-file",
-        help="Path to custom prompt file",
-        rich_help_panel="Advanced Options"
+        None, "--prompt-file", help="Path to custom prompt file", rich_help_panel="Advanced Options"
     ),
     config: Optional[str] = typer.Option(
-        None,
-        "--config",
-        help="Load settings from JSON config file",
-        rich_help_panel="Advanced Options"
+        None, "--config", help="Load settings from JSON config file", rich_help_panel="Advanced Options"
     ),
     context_threshold: int = typer.Option(
         20,
         "--context-threshold",
         help="Restart agent when context ≤ this percentage",
-        rich_help_panel="Advanced Options"
+        rich_help_panel="Advanced Options",
     ),
     idle_timeout: int = typer.Option(
         60,
         "--idle-timeout",
         help="Seconds of inactivity before marking agent as idle",
-        rich_help_panel="Advanced Options"
+        rich_help_panel="Advanced Options",
     ),
     max_errors: int = typer.Option(
-        3,
-        "--max-errors",
-        help="Maximum consecutive errors before disabling agent",
-        rich_help_panel="Advanced Options"
+        3, "--max-errors", help="Maximum consecutive errors before disabling agent", rich_help_panel="Advanced Options"
     ),
     tmux_kill_on_exit: bool = typer.Option(
         True,
         "--tmux-kill-on-exit/--no-tmux-kill-on-exit",
         help="Kill tmux session on exit",
-        rich_help_panel="Advanced Options"
+        rich_help_panel="Advanced Options",
     ),
     tmux_mouse: bool = typer.Option(
-        True,
-        "--tmux-mouse/--no-tmux-mouse",
-        help="Enable tmux mouse support",
-        rich_help_panel="Advanced Options"
-    )
+        True, "--tmux-mouse/--no-tmux-mouse", help="Enable tmux mouse support", rich_help_panel="Advanced Options"
+    ),
 ) -> None:
     """
     Claude Code Agent Farm - Parallel code fixing automation
@@ -775,7 +882,7 @@ def main(
         idle_timeout=idle_timeout,
         max_errors=max_errors,
         tmux_kill_on_exit=tmux_kill_on_exit,
-        tmux_mouse=tmux_mouse
+        tmux_mouse=tmux_mouse,
     )
 
     try:
@@ -785,9 +892,81 @@ def main(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         import traceback
+
         traceback.print_exc()
     finally:
         farm.shutdown()
+
+
+@app.command(name="monitor-only")
+def monitor_only(
+    path: str = typer.Option(..., "--path", help="Absolute path to project root"),
+    session: str = typer.Option("claude_agents", "--session", "-s", help="tmux session name"),
+) -> None:
+    """Run monitor display only - internal command used by the orchestrator"""
+    project_path = Path(path).expanduser().resolve()
+    state_file = project_path / MONITOR_STATE_FILE
+
+    console.print(
+        Panel.fit(
+            f"[bold cyan]Claude Agent Farm Monitor[/bold cyan]\nSession: {session}\nPress Ctrl+C to exit monitor view",
+            border_style="cyan",
+        )
+    )
+
+    with Live(console=console, refresh_per_second=1) as live:
+        while True:
+            try:
+                if state_file.exists():
+                    with state_file.open() as f:
+                        state_data = json.load(f)
+
+                    # Recreate table from state data
+                    table = Table(title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}")
+                    table.add_column("Agent", style="cyan", width=8)
+                    table.add_column("Status", style="green", width=10)
+                    table.add_column("Cycles", style="yellow", width=6)
+                    table.add_column("Context", style="magenta", width=8)
+                    table.add_column("Runtime", style="blue", width=12)
+                    table.add_column("Errors", style="red", width=6)
+
+                    agents = state_data.get("agents", {})
+
+                    for agent_id in sorted(int(k) for k in agents):
+                        agent = agents[str(agent_id)]
+                        agent_start = datetime.fromisoformat(agent["start_time"])
+                        runtime = str(datetime.now() - agent_start).split(".")[0]
+
+                        status_style = {
+                            "working": "[green]",
+                            "ready": "[cyan]",
+                            "idle": "[yellow]",
+                            "error": "[red]",
+                            "starting": "[yellow]",
+                            "unknown": "[dim]",
+                        }.get(agent["status"], "")
+
+                        table.add_row(
+                            f"Pane {agent_id:02d}",
+                            f"{status_style}{agent['status']}[/]",
+                            str(agent["cycles"]),
+                            f"{agent['last_context']}%",
+                            runtime,
+                            str(agent["errors"]),
+                        )
+
+                    live.update(table)
+                else:
+                    live.update("[yellow]Waiting for monitor data...[/yellow]")
+
+                time.sleep(1)
+
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                live.update(f"[red]Error reading state: {e}[/red]")
+                time.sleep(1)
+
 
 if __name__ == "__main__":
     app()

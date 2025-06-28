@@ -28,7 +28,7 @@ print_color "${YELLOW}━━━━━━━━━━━━━━━━━━━�
 print_color "\n"
 print_color "1) Grid view    - See all agents at once\n"
 print_color "2) Focus mode   - Cycle through individual agents\n"
-print_color "3) Split view   - Controller + agents side by side\n"
+print_color "3) Split view   - Monitor dashboard + agents side by side\n"
 print_color "4) Quick attach - Jump right into the session\n"
 print_color "\n"
 print_color "${GREEN}Tip: Press Ctrl+B then D to detach${NC}\n"
@@ -58,12 +58,20 @@ case "$choice" in
         tmux attach-session -t "$SESSION:agents"
         ;;
     3)
-        # Split view - controller and agents
+        # Split view - monitor dashboard and agents
         print_color "${GREEN}Creating split view...${NC}\n"
-        tmux attach-session -t "$SESSION" \; \
-            select-window -t controller \; \
-            split-window -h -p 80 \; \
-            send-keys "tmux select-window -t agents" C-m
+        # Check if both windows exist
+        if tmux list-windows -t "$SESSION" | grep -q "controller:" && \
+           tmux list-windows -t "$SESSION" | grep -q "agents:"; then
+            tmux attach-session -t "$SESSION" \; \
+                select-window -t controller \; \
+                split-window -h -p 80 \; \
+                select-window -t agents
+        else
+            print_color "${YELLOW}Warning: Split view requires both controller and agents windows${NC}\n"
+            print_color "${YELLOW}Falling back to quick attach${NC}\n"
+            tmux attach-session -t "$SESSION"
+        fi
         ;;
     4)
         # Quick attach

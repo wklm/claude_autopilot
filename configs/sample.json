@@ -1,5 +1,5 @@
 {
-    "comment": "Set 'path' to your project directory when using this config",
+    "comment": "This is a sample configuration. The 'path' parameter is still required via CLI.",
     "agents": 20,
     "session": "claude_agents",
     "stagger": 4.0,
@@ -14,12 +14,8 @@
     "context_threshold": 20,
     "idle_timeout": 60,
     "max_errors": 3,
-    "verbose": false,
-    "log_file": null,
     "git_branch": null,
     "git_remote": "origin",
-    "batch_size": 50,
-    "max_agents": 50,
     "tmux_kill_on_exit": true,
     "tmux_mouse": true
 }

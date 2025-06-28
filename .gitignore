@@ -55,3 +55,11 @@ coverage.xml
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Backup files
+*.bak
+*.backup
+
+# Claude Agent Farm state files
+.claude_agent_farm_state.json
+.claude_agent_farm_state.tmp
