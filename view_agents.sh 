@@ -1,0 +1,63 @@
+#!/bin/bash
+# Simple viewer for Claude Agent Farm tmux session
+
+SESSION="${1:-claude_agents}"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Check if session exists
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo -e "${RED}Error: Session '$SESSION' not found${NC}"
+    echo "Usage: $0 [session-name]"
+    exit 1
+fi
+
+echo -e "${CYAN}Claude Agent Farm Viewer${NC}"
+echo -e "${CYAN}Session: $SESSION${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "1) Grid view    - See all agents at once"
+echo "2) Focus mode   - Cycle through individual agents"
+echo "3) Split view   - Controller + agents side by side"
+echo "4) Quick attach - Jump right into the session"
+echo ""
+echo -e "${GREEN}Tip: Press Ctrl+B then D to detach${NC}"
+echo ""
+read -p "Choose mode [1-4]: " choice
+
+case $choice in
+    1)
+        # Grid view - show all panes at once
+        echo -e "${GREEN}Entering grid view...${NC}"
+        tmux attach-session -t "$SESSION:agents"
+        ;;
+    2)
+        # Focus mode - use tmux native navigation
+        echo -e "${GREEN}Entering focus mode...${NC}"
+        echo -e "${YELLOW}Navigate: Ctrl+B then arrow keys${NC}"
+        echo -e "${YELLOW}Zoom: Ctrl+B then Z${NC}"
+        sleep 2
+        tmux attach-session -t "$SESSION:agents"
+        ;;
+    3)
+        # Split view - controller and agents
+        echo -e "${GREEN}Creating split view...${NC}"
+        tmux attach-session -t "$SESSION" \; \
+            select-window -t controller \; \
+            split-window -h -p 80 \; \
+            send-keys "tmux select-window -t agents" C-m
+        ;;
+    4)
+        # Quick attach
+        tmux attach-session -t "$SESSION"
+        ;;
+    *)
+        echo -e "${RED}Invalid choice${NC}"
+        exit 1
+        ;;
+esac
