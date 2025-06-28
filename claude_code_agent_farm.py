@@ -235,6 +235,20 @@ class AgentMonitor:
         indicators = ["✻ Pontificating", "● Bash(", "✻ Running", "✻ Thinking", "esc to interrupt"]
         return any(indicator in content for indicator in indicators)
 
+    def has_welcome_screen(self, content: str) -> bool:
+        """Check if Claude Code is showing the welcome/setup screen"""
+        welcome_indicators = [
+            "Welcome to Claude Code",
+            "Choose the text style",
+            "Choose your language",
+            "Let's get started",
+            "run /theme",
+            "Dark mode✔",
+            "Light mode",
+            "colorblind-friendly",
+        ]
+        return any(indicator in content for indicator in welcome_indicators)
+
     def has_settings_error(self, content: str) -> bool:
         """Check for settings corruption"""
         error_indicators = [
@@ -463,6 +477,121 @@ class ClaudeAgentFarm:
             self.shutting_down = True
             console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...[/yellow]")
             self.running = False
+
+    def _backup_claude_settings(self) -> Optional[str]:
+        """Backup entire Claude Code directory and return backup path"""
+        claude_dir = Path.home() / ".claude"
+        if not claude_dir.exists():
+            console.print("[yellow]No Claude Code directory found to backup[/yellow]")
+            return None
+
+        try:
+            # Create backup directory in project
+            backup_dir = self.project_path / ".claude_agent_farm_backups"
+            backup_dir.mkdir(exist_ok=True)
+
+            # Create timestamped backup filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = backup_dir / f"claude_backup_{timestamp}.tar.gz"
+
+            # Create compressed backup
+            import tarfile
+
+            console.print("[dim]Creating backup of ~/.claude directory...[/dim]")
+
+            with tarfile.open(backup_file, "w:gz") as tar:
+                tar.add(claude_dir, arcname="claude")
+
+            # Get backup size
+            size_mb = backup_file.stat().st_size / (1024 * 1024)
+            console.print(f"[green]✓ Backed up Claude directory to {backup_file.name} ({size_mb:.1f} MB)[/green]")
+
+            # Clean up old backups (keep last 10)
+            self._cleanup_old_backups(backup_dir, keep_count=10)
+
+            return str(backup_file)
+        except Exception as e:
+            console.print(f"[red]Error: Could not backup Claude directory: {e}[/red]")
+            return None
+
+    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10) -> None:
+        """Remove old backups, keeping only the most recent ones"""
+        try:
+            backups = sorted(backup_dir.glob("claude_backup_*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+            if len(backups) > keep_count:
+                for old_backup in backups[keep_count:]:
+                    old_backup.unlink()
+                    console.print(f"[dim]Removed old backup: {old_backup.name}[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not clean up old backups: {e}[/yellow]")
+
+    def _restore_claude_settings(self, backup_path: Optional[str] = None) -> bool:
+        """Restore Claude Code directory from backup"""
+        try:
+            # If no backup path provided, use the most recent one
+            if backup_path is None:
+                backup_path = self.settings_backup_path
+
+            if not backup_path:
+                console.print("[red]No backup path available[/red]")
+                return False
+
+            backup_file = Path(backup_path)
+            if not backup_file.exists():
+                console.print(f"[red]Backup file not found: {backup_path}[/red]")
+                return False
+
+            claude_dir = Path.home() / ".claude"
+
+            # Create a temporary backup of current state before restoring
+            temp_backup = claude_dir.parent / ".claude_temp_backup"
+            if claude_dir.exists():
+                import shutil
+
+                if temp_backup.exists():
+                    shutil.rmtree(temp_backup)
+                shutil.copytree(claude_dir, temp_backup)
+
+            try:
+                # Remove existing directory
+                if claude_dir.exists():
+                    import shutil
+
+                    shutil.rmtree(claude_dir)
+
+                # Extract backup
+                import tarfile
+
+                console.print(f"[dim]Restoring from {backup_file.name}...[/dim]")
+
+                with tarfile.open(backup_file, "r:gz") as tar:
+                    # Extract to parent directory (home)
+                    tar.extractall(path=claude_dir.parent)
+
+                console.print("[green]✓ Restored Claude directory from backup[/green]")
+
+                # Remove temp backup on success
+                if temp_backup.exists():
+                    shutil.rmtree(temp_backup)
+
+                return True
+
+            except Exception as e:
+                # Restore from temp backup on failure
+                console.print(f"[red]Error during restore: {e}[/red]")
+                if temp_backup.exists():
+                    console.print("[yellow]Attempting to restore previous state...[/yellow]")
+                    if claude_dir.exists():
+                        import shutil
+
+                        shutil.rmtree(claude_dir)
+                    shutil.move(temp_backup, claude_dir)
+                return False
+
+        except Exception as e:
+            console.print(f"[red]Error restoring Claude directory: {e}[/red]")
+            return False
 
     def _load_prompt(self) -> str:
         """Load prompt from file or use default"""
@@ -819,6 +948,39 @@ class ClaudeAgentFarm:
 
         console.print(f"[green]✓ Created session with {self.agents} panes[/green]")
 
+    def _acquire_claude_lock(self, timeout: float = 5.0) -> bool:
+        """Acquire a lock file to prevent concurrent Claude Code launches"""
+        lock_file = Path.home() / ".claude" / ".agent_farm_launch.lock"
+        lock_file.parent.mkdir(exist_ok=True)
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to create lock file exclusively
+                fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, f"{os.getpid()}\n".encode())
+                os.close(fd)
+                return True
+            except FileExistsError:
+                # Lock file exists, check if it's stale
+                try:
+                    if lock_file.exists():  # noqa: SIM102
+                        # Check if lock is older than 30 seconds (likely stale)
+                        if time.time() - lock_file.stat().st_mtime > 30:
+                            lock_file.unlink()
+                            continue
+                except Exception:
+                    pass
+                time.sleep(0.1)
+
+        return False
+
+    def _release_claude_lock(self) -> None:
+        """Release the Claude Code launch lock"""
+        lock_file = Path.home() / ".claude" / ".agent_farm_launch.lock"
+        with contextlib.suppress(Exception):
+            lock_file.unlink()
+
     def start_agent(self, agent_id: int, restart: bool = False) -> None:
         """Start or restart a single agent"""
         pane_target = self.pane_mapping.get(agent_id)
@@ -839,16 +1001,35 @@ class ClaudeAgentFarm:
         # Navigate and start Claude Code
         # Quote the path so directories with spaces or shell metacharacters work
         tmux_send(pane_target, f"cd {shlex.quote(str(self.project_path))}")
-        tmux_send(pane_target, "cc")
 
-        if not restart:
-            console.print(f"🛠  Agent {agent_id:02d}: launching cc, waiting {self.wait_after_cc}s...")
-
-        # Make wait_after_cc interruptible
-        for _ in range(int(self.wait_after_cc * 5)):
-            if not self.running:
+        # Acquire lock before launching cc to prevent config corruption
+        lock_acquired = False
+        if not self._acquire_claude_lock(timeout=10.0):
+            console.print(f"[yellow]Agent {agent_id:02d}: Waiting for lock to launch cc...[/yellow]")
+            # Try once more with longer timeout
+            if not self._acquire_claude_lock(timeout=20.0):
+                console.print(f"[red]Agent {agent_id:02d}: Could not acquire lock - aborting launch[/red]")
+                if self.monitor:
+                    self.monitor.agents[agent_id]["status"] = "error"
+                    self.monitor.agents[agent_id]["errors"] += 1
                 return
-            time.sleep(0.2)
+
+        lock_acquired = True
+        try:
+            tmux_send(pane_target, "cc")
+
+            if not restart:
+                console.print(f"🛠  Agent {agent_id:02d}: launching cc, waiting {self.wait_after_cc}s...")
+
+            # Make wait_after_cc interruptible
+            for _ in range(int(self.wait_after_cc * 5)):
+                if not self.running:
+                    return
+                time.sleep(0.2)
+        finally:
+            # Always release lock
+            if lock_acquired:
+                self._release_claude_lock()
 
         # Verify Claude Code started successfully
         max_retries = 3
@@ -863,9 +1044,31 @@ class ClaudeAgentFarm:
             # Check for various failure conditions
             if not content or len(content.strip()) < 10:
                 # Empty or nearly empty content indicates cc didn't start
-                console.print(f"[yellow]Agent {agent_id:02d}: No output from Claude Code yet (attempt {attempt+1}/{max_retries})[/yellow]")
-            elif self.monitor and self.monitor.has_settings_error(content):
-                console.print(f"[red]Agent {agent_id:02d}: Settings error/login prompt detected[/red]")
+                console.print(
+                    f"[yellow]Agent {agent_id:02d}: No output from Claude Code yet (attempt {attempt + 1}/{max_retries})[/yellow]"
+                )
+            elif self.monitor and (
+                self.monitor.has_settings_error(content) or self.monitor.has_welcome_screen(content)
+            ):
+                console.print(
+                    f"[red]Agent {agent_id:02d}: Settings error/setup screen detected - attempting restore[/red]"
+                )
+
+                # Kill this cc instance
+                tmux_send(pane_target, "\x03")  # Ctrl+C
+                time.sleep(0.5)
+
+                # Try to restore from backup
+                if hasattr(self, "settings_backup_path") and self.settings_backup_path:  # noqa: SIM102
+                    if self._restore_claude_settings():
+                        console.print(f"[green]Settings restored for agent {agent_id} - retrying launch[/green]")
+                        # Return to shell and retry
+                        self._wait_for_shell_prompt(pane_target, timeout=5)
+                        tmux_send(pane_target, "cc")
+                        time.sleep(self.wait_after_cc)
+                        # Continue to next iteration to check again
+                        continue
+
                 if self.monitor:
                     self.monitor.agents[agent_id]["status"] = "error"
                     self.monitor.agents[agent_id]["errors"] += 1
@@ -887,7 +1090,9 @@ class ClaudeAgentFarm:
                         return
                     time.sleep(0.2)
             else:
-                console.print(f"[red]Agent {agent_id:02d}: Claude Code failed to start properly after {max_retries} attempts[/red]")
+                console.print(
+                    f"[red]Agent {agent_id:02d}: Claude Code failed to start properly after {max_retries} attempts[/red]"
+                )
                 if self.monitor:
                     self.monitor.agents[agent_id]["status"] = "error"
                     self.monitor.agents[agent_id]["errors"] += 1
@@ -925,6 +1130,10 @@ class ClaudeAgentFarm:
         """Launch all agents with staggered start times"""
         console.rule("[yellow]Launching agents")
 
+        # Track successful launches to detect corruption patterns
+        successful_launches = 0
+        corruption_detected = False
+
         for i in range(self.agents):
             if not self.running:
                 console.print("[yellow]Agent launch interrupted by shutdown signal[/yellow]")
@@ -932,13 +1141,40 @@ class ClaudeAgentFarm:
 
             self.start_agent(i)
 
+            # Check if last agent started successfully
+            if self.monitor and i > 0:
+                time.sleep(1)  # Brief pause to let status update
+                prev_agent_status = self.monitor.agents[i]["status"]
+                if prev_agent_status == "error":
+                    corruption_detected = True
+                    console.print("[yellow]Detected potential config corruption - increasing launch delay[/yellow]")
+                else:
+                    successful_launches += 1
+
             # Stagger starts to avoid config clobbering
             if i < self.agents - 1 and self.running:
+                # Dynamic stagger time based on corruption detection
+                if corruption_detected:
+                    # Use longer delay if we've seen errors
+                    stagger_time = self.stagger * 2.0
+                    console.print(f"[dim]Using extended stagger time: {stagger_time}s[/dim]")
+                else:
+                    # Gradually increase stagger time as we launch more agents
+                    # This helps prevent pile-up effects
+                    stagger_time = self.stagger * (1.0 + i * 0.1)
+
                 # Use smaller sleep intervals to be more responsive to shutdown
-                for _ in range(int(self.stagger * 5)):
+                for _ in range(int(stagger_time * 5)):
                     if not self.running:
                         break
                     time.sleep(0.2)
+
+        if successful_launches < self.agents:
+            console.print(
+                f"[yellow]Warning: Only {successful_launches}/{self.agents} agents launched successfully[/yellow]"
+            )
+            if self.auto_restart:
+                console.print("[yellow]Auto-restart enabled - failed agents will be retried[/yellow]")
 
     def monitor_loop(self) -> None:
         """Main monitoring loop with auto-restart capability"""
@@ -1005,6 +1241,9 @@ class ClaudeAgentFarm:
             )
         )
 
+        # Backup Claude settings before starting
+        self.settings_backup_path = self._backup_claude_settings()
+
         try:
             # Execute workflow steps
             self.regenerate_problems()
@@ -1069,6 +1308,10 @@ class ClaudeAgentFarm:
             # Clean up state file
             if hasattr(self, "state_file") and self.state_file.exists():
                 self.state_file.unlink()
+            # Clean up lock file
+            lock_file = Path.home() / ".claude" / ".agent_farm_launch.lock"
+            if lock_file.exists():
+                lock_file.unlink()
 
     def write_monitor_state(self) -> None:
         """Write current monitor state to shared file"""
