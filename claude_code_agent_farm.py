@@ -95,8 +95,12 @@ def run(cmd: str, *, check: bool = True, quiet: bool = False, capture: bool = Fa
         return result.returncode, result.stdout or "", result.stderr or ""
     else:
         # Stream output to terminal when not capturing
-        stdout_pipe = subprocess.DEVNULL if quiet else None
-        stderr_pipe = subprocess.DEVNULL if quiet else subprocess.STDOUT
+        # Preserve stderr even in quiet-mode so that exceptions contain detail
+        if quiet:
+            result = subprocess.run(cmd_arg, shell=use_shell, capture_output=True, text=True, check=check)
+            return result.returncode, result.stdout or "", result.stderr or ""
+        stdout_pipe = None
+        stderr_pipe = subprocess.STDOUT
         try:
             result = subprocess.run(
                 cmd_arg, shell=use_shell, check=check, stdout=stdout_pipe, stderr=stderr_pipe, text=True
@@ -228,7 +232,18 @@ class AgentMonitor:
 
     def is_claude_ready(self, content: str) -> bool:
         """Check if Claude Code is ready for input"""
-        return bool("│ >" in content and "for shortcuts" in content)
+        # Multiple possible indicators that Claude is ready
+        ready_indicators = [
+            "Welcome to Claude Code!" in content,  # Welcome message
+            ("│ > Try" in content),  # The prompt box with suggestion
+            ("? for shortcuts" in content),  # Shortcuts hint at bottom
+            ("╰─" in content and "│ >" in content),  # Box structure with prompt
+            ("/help for help" in content),  # Help text in welcome message
+            ("cwd:" in content and "Welcome to Claude" in content),  # Working directory shown
+            ("Bypassing Permissions" in content and "│ >" in content),  # May appear with prompt
+            ("│ >" in content and "─╯" in content),  # Prompt box bottom border
+        ]
+        return any(ready_indicators)
 
     def is_claude_working(self, content: str) -> bool:
         """Check if Claude Code is actively working"""
@@ -238,7 +253,7 @@ class AgentMonitor:
     def has_welcome_screen(self, content: str) -> bool:
         """Check if Claude Code is showing the welcome/setup screen"""
         welcome_indicators = [
-            "Welcome to Claude Code",
+            # Setup/onboarding screens only
             "Choose the text style",
             "Choose your language",
             "Let's get started",
@@ -246,11 +261,16 @@ class AgentMonitor:
             "Dark mode✔",
             "Light mode",
             "colorblind-friendly",
+            # Remove "Welcome to Claude Code" as it appears when ready
         ]
         return any(indicator in content for indicator in welcome_indicators)
 
     def has_settings_error(self, content: str) -> bool:
         """Check for settings corruption"""
+        # First check if Claude is actually ready (avoid false positives)
+        if self.is_claude_ready(content):
+            return False
+            
         error_indicators = [
             # Login/auth prompts
             "Select login method:",
@@ -388,8 +408,8 @@ class ClaudeAgentFarm:
         path: str,
         agents: int = 20,
         session: str = "claude_agents",
-        stagger: float = 4.0,
-        wait_after_cc: float = 3.0,
+        stagger: float = 10.0,  # Increased from 4.0 to prevent settings clobbering
+        wait_after_cc: float = 15.0,  # Increased from 8.0 to ensure Claude Code is fully ready
         check_interval: int = 10,
         skip_regenerate: bool = False,
         skip_commit: bool = False,
@@ -404,6 +424,7 @@ class ClaudeAgentFarm:
         tmux_kill_on_exit: bool = True,
         tmux_mouse: bool = True,
         fast_start: bool = False,
+        full_backup: bool = False,
     ):
         # Store all parameters
         self.path = path
@@ -425,6 +446,7 @@ class ClaudeAgentFarm:
         self.tmux_kill_on_exit = tmux_kill_on_exit
         self.tmux_mouse = tmux_mouse
         self.fast_start = fast_start
+        self.full_backup = full_backup
 
         # Initialize pane mapping
         self.pane_mapping: Dict[int, str] = {}
@@ -479,36 +501,86 @@ class ClaudeAgentFarm:
             self.running = False
 
     def _backup_claude_settings(self) -> Optional[str]:
-        """Backup entire Claude Code directory and return backup path"""
+        """Backup essential Claude Code settings (excluding large caches)"""
         claude_dir = Path.home() / ".claude"
         if not claude_dir.exists():
             console.print("[yellow]No Claude Code directory found to backup[/yellow]")
             return None
-
+        
         try:
             # Create backup directory in project
             backup_dir = self.project_path / ".claude_agent_farm_backups"
             backup_dir.mkdir(exist_ok=True)
-
+            
             # Create timestamped backup filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = backup_dir / f"claude_backup_{timestamp}.tar.gz"
-
+            backup_type = "full" if self.full_backup else "essential"
+            backup_file = backup_dir / f"claude_backup_{backup_type}_{timestamp}.tar.gz"
+            
             # Create compressed backup
             import tarfile
-
-            console.print("[dim]Creating backup of ~/.claude directory...[/dim]")
-
-            with tarfile.open(backup_file, "w:gz") as tar:
-                tar.add(claude_dir, arcname="claude")
-
-            # Get backup size
-            size_mb = backup_file.stat().st_size / (1024 * 1024)
-            console.print(f"[green]✓ Backed up Claude directory to {backup_file.name} ({size_mb:.1f} MB)[/green]")
-
+            
+            if self.full_backup:
+                console.print("[dim]Creating FULL backup of ~/.claude directory (this may take a while)...[/dim]")
+                
+                with tarfile.open(backup_file, "w:gz") as tar:
+                    # Use filter to preserve all metadata
+                    def reset_ids(tarinfo):
+                        # Preserve all metadata but reset user/group to current user
+                        # This prevents permission issues on restore
+                        tarinfo.uid = os.getuid()
+                        tarinfo.gid = os.getgid()
+                        return tarinfo
+                    
+                    tar.add(claude_dir, arcname="claude", filter=reset_ids)
+                
+                size_mb = backup_file.stat().st_size / (1024 * 1024)
+                console.print(f"[green]✓ Full backup completed: {backup_file.name} ({size_mb:.1f} MB)[/green]")
+            else:
+                console.print("[dim]Creating backup of essential Claude settings...[/dim]")
+                
+                with tarfile.open(backup_file, "w:gz") as tar:
+                    # Filter to preserve metadata
+                    def reset_ids(tarinfo):
+                        tarinfo.uid = os.getuid()
+                        tarinfo.gid = os.getgid()
+                        return tarinfo
+                    
+                    # Add settings.json if it exists
+                    settings_file = claude_dir / "settings.json"
+                    if settings_file.exists():
+                        tar.add(settings_file, arcname="claude/settings.json", filter=reset_ids)
+                    
+                    # Add ide directory (usually empty or small)
+                    ide_dir = claude_dir / "ide"
+                    if ide_dir.exists():
+                        tar.add(ide_dir, arcname="claude/ide", filter=reset_ids)
+                    
+                    # Add statsig directory (small, contains feature flags)
+                    statsig_dir = claude_dir / "statsig"
+                    if statsig_dir.exists():
+                        tar.add(statsig_dir, arcname="claude/statsig", filter=reset_ids)
+                    
+                    # Optionally add todos (usually small)
+                    todos_dir = claude_dir / "todos"
+                    if todos_dir.exists():
+                        # Check size first
+                        todos_size = sum(f.stat().st_size for f in todos_dir.rglob("*") if f.is_file())
+                        if todos_size < 10 * 1024 * 1024:  # Less than 10MB
+                            tar.add(todos_dir, arcname="claude/todos", filter=reset_ids)
+                        else:
+                            console.print(f"[dim]Skipping todos directory ({todos_size / 1024 / 1024:.1f} MB)[/dim]")
+                    
+                    # Skip projects directory - it's just caches
+                    console.print("[dim]Skipping projects/ directory (caches)[/dim]")
+                
+                # Get backup size
+                size_kb = backup_file.stat().st_size / 1024
+                console.print(f"[green]✓ Backed up Claude settings to {backup_file.name} ({size_kb:.1f} KB)[/green]")
+            
             # Clean up old backups (keep last 10)
             self._cleanup_old_backups(backup_dir, keep_count=10)
-
+            
             return str(backup_file)
         except Exception as e:
             console.print(f"[red]Error: Could not backup Claude directory: {e}[/red]")
@@ -517,8 +589,9 @@ class ClaudeAgentFarm:
     def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10) -> None:
         """Remove old backups, keeping only the most recent ones"""
         try:
+            # Find all backup files (both essential and full)
             backups = sorted(backup_dir.glob("claude_backup_*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
-
+            
             if len(backups) > keep_count:
                 for old_backup in backups[keep_count:]:
                     old_backup.unlink()
@@ -527,70 +600,89 @@ class ClaudeAgentFarm:
             console.print(f"[yellow]Warning: Could not clean up old backups: {e}[/yellow]")
 
     def _restore_claude_settings(self, backup_path: Optional[str] = None) -> bool:
-        """Restore Claude Code directory from backup"""
+        """Restore Claude Code settings from backup"""
         try:
             # If no backup path provided, use the most recent one
             if backup_path is None:
                 backup_path = self.settings_backup_path
-
+            
             if not backup_path:
                 console.print("[red]No backup path available[/red]")
                 return False
-
+            
             backup_file = Path(backup_path)
             if not backup_file.exists():
                 console.print(f"[red]Backup file not found: {backup_path}[/red]")
                 return False
-
+            
             claude_dir = Path.home() / ".claude"
-
-            # Create a temporary backup of current state before restoring
-            temp_backup = claude_dir.parent / ".claude_temp_backup"
-            if claude_dir.exists():
-                import shutil
-
-                if temp_backup.exists():
-                    shutil.rmtree(temp_backup)
-                shutil.copytree(claude_dir, temp_backup)
-
+            
+            # For partial backups, we don't need to remove the entire directory
+            # Just extract over existing files
             try:
-                # Remove existing directory
-                if claude_dir.exists():
-                    import shutil
-
-                    shutil.rmtree(claude_dir)
-
+                # Ensure claude directory exists
+                claude_dir.mkdir(exist_ok=True)
+                
+                # Save original metadata of existing files
+                existing_metadata = {}
+                for item in claude_dir.rglob("*"):
+                    if item.exists():
+                        stat = item.stat()
+                        existing_metadata[str(item)] = {
+                            'mode': stat.st_mode,
+                            'mtime': stat.st_mtime,
+                            'atime': stat.st_atime,
+                        }
+                
                 # Extract backup
                 import tarfile
-
                 console.print(f"[dim]Restoring from {backup_file.name}...[/dim]")
-
+                
                 with tarfile.open(backup_file, "r:gz") as tar:
-                    # Extract to parent directory (home)
-                    tar.extractall(path=claude_dir.parent)
-
-                console.print("[green]✓ Restored Claude directory from backup[/green]")
-
-                # Remove temp backup on success
-                if temp_backup.exists():
-                    shutil.rmtree(temp_backup)
-
+                    # Extract with numeric owner to preserve permissions
+                    tar.extractall(path=claude_dir.parent, numeric_owner=True)
+                    
+                    # Get list of extracted files to preserve their times
+                    for member in tar.getmembers():
+                        if member.isfile():
+                            extracted_path = claude_dir.parent / member.name
+                            if extracted_path.exists():
+                                # Preserve the modification time from the archive
+                                os.utime(extracted_path, (member.mtime, member.mtime))
+                
+                # Ensure proper permissions on sensitive files
+                settings_file = claude_dir / "settings.json"
+                if settings_file.exists():
+                    # Ensure settings.json has appropriate permissions (readable by user only)
+                    os.chmod(settings_file, 0o600)
+                
+                # Set ownership to current user for all restored files
+                uid = os.getuid()
+                gid = os.getgid()
+                
+                for root, dirs, files in os.walk(claude_dir):
+                    for d in dirs:
+                        path = Path(root) / d
+                        with contextlib.suppress(Exception):
+                            os.chown(path, uid, gid)
+                    for f in files:
+                        path = Path(root) / f
+                        with contextlib.suppress(Exception):
+                            os.chown(path, uid, gid)
+                
+                console.print("[green]✓ Restored Claude settings from backup[/green]")
+                
+                # Check and fix permissions after restore
+                self._check_claude_permissions()
+                
                 return True
-
+                
             except Exception as e:
-                # Restore from temp backup on failure
                 console.print(f"[red]Error during restore: {e}[/red]")
-                if temp_backup.exists():
-                    console.print("[yellow]Attempting to restore previous state...[/yellow]")
-                    if claude_dir.exists():
-                        import shutil
-
-                        shutil.rmtree(claude_dir)
-                    shutil.move(temp_backup, claude_dir)
                 return False
-
+                
         except Exception as e:
-            console.print(f"[red]Error restoring Claude directory: {e}[/red]")
+            console.print(f"[red]Error restoring Claude settings: {e}[/red]")
             return False
 
     def _load_prompt(self) -> str:
@@ -722,8 +814,9 @@ class ClaudeAgentFarm:
             commit_cmd = ["git", "commit", "-m", f"Before next round of fixes; currently {count} lines of problems"]
             commit_result = subprocess.run(commit_cmd, capture_output=True, text=True)
 
+            both = (commit_result.stdout or "") + (commit_result.stderr or "")
             if commit_result.returncode != 0:  # noqa: SIM102
-                if "nothing to commit" in commit_result.stdout or "no changes added" in commit_result.stdout:
+                if "nothing to commit" in both or "no changes added" in both:
                     console.print("[yellow]No changes to commit - skipping push[/yellow]")
                     return
                 # Other errors still show warning below
@@ -740,16 +833,23 @@ class ClaudeAgentFarm:
         except subprocess.CalledProcessError:
             console.print("[yellow]⚠ git commit/push skipped (no changes?)")
 
-    def _wait_for_shell_prompt(self, pane_target: str, timeout: int = 30) -> bool:
-        """Wait for a shell prompt to appear in the pane"""
+    def _wait_for_shell_prompt(self, pane_target: str, timeout: int = 30, ignore_shutdown: bool = False) -> bool:
+        """Wait for a shell prompt to appear in the pane
+        
+        Args:
+            pane_target: The tmux pane to check
+            timeout: Maximum time to wait in seconds
+            ignore_shutdown: If True, don't abort on shutdown signal (for error recovery)
+        """
         start_time = time.time()
+        content: str = ""  # prevents UnboundLocalError on early exit
         last_content = ""
         debug_shown = False
 
         # Get the last part of the project path for detection
         project_dir_name = self.project_path.name
 
-        while time.time() - start_time < timeout and self.running:
+        while time.time() - start_time < timeout and (ignore_shutdown or self.running):
             content = tmux_capture(pane_target)
             if content and content != last_content:
                 lines = content.strip().splitlines()
@@ -814,8 +914,26 @@ class ClaudeAgentFarm:
         """Create tmux session with tiled agent panes"""
         console.rule(f"[yellow]Creating tmux session '{self.session}' with {self.agents} agents")
 
+        # Disable PowerLevel10K instant prompt to avoid errors in tmux panes
+        console.print("[dim]Disabling PowerLevel10K instant prompt...[/dim]")
+        p10k_config = Path.home() / ".p10k.zsh"
+        if p10k_config.exists():
+            try:
+                # Read the config file
+                content = p10k_config.read_text()
+                # Check if instant prompt is not already disabled
+                if "POWERLEVEL9K_INSTANT_PROMPT=off" not in content:
+                    # Add the setting at the beginning of the file
+                    new_content = "typeset -g POWERLEVEL9K_INSTANT_PROMPT=off\n" + content
+                    p10k_config.write_text(new_content)
+                    console.print("[green]✓ Disabled PowerLevel10K instant prompt[/green]")
+                else:
+                    console.print("[dim]PowerLevel10K instant prompt already disabled[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not disable P10K instant prompt: {e}[/yellow]")
+
         # Kill existing session if it exists
-        run(f"tmux kill-session -t {self.session} 2>/dev/null", check=False, quiet=True)
+        run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
         time.sleep(0.5)
 
         # Create new session with controller window
@@ -838,7 +956,10 @@ class ClaudeAgentFarm:
             _, pane_list, _ = run(
                 f"tmux list-panes -t {self.session}:agents -F '#{{pane_index}}'", capture=True, quiet=True
             )
-            pane_ids = [line.strip() for line in pane_list.strip().split("\n") if line.strip()]
+            pane_ids = sorted(  # make mapping deterministic
+                (pid.strip() for pid in pane_list.strip().splitlines() if pid.strip()),
+                key=int,
+            )
 
             if len(pane_ids) == self.agents:
                 break
@@ -981,6 +1102,44 @@ class ClaudeAgentFarm:
         with contextlib.suppress(Exception):
             lock_file.unlink()
 
+    def _check_claude_permissions(self) -> bool:
+        """Check and fix permissions on Claude settings files"""
+        claude_dir = Path.home() / ".claude"
+        settings_file = claude_dir / "settings.json"
+        
+        try:
+            if settings_file.exists():
+                # Get current permissions
+                current_mode = settings_file.stat().st_mode & 0o777
+                
+                # Check if permissions are too open
+                if current_mode != 0o600:
+                    console.print(f"[yellow]Fixing permissions on {settings_file.name} (was {oct(current_mode)})[/yellow]")
+                    os.chmod(settings_file, 0o600)
+                
+                # Ensure we own the file
+                stat_info = settings_file.stat()
+                if stat_info.st_uid != os.getuid():
+                    console.print(f"[yellow]Fixing ownership on {settings_file.name}[/yellow]")
+                    try:
+                        os.chown(settings_file, os.getuid(), os.getgid())
+                    except PermissionError:
+                        console.print("[red]Could not change ownership - may need sudo[/red]")
+                        return False
+            
+            # Check directory permissions
+            if claude_dir.exists():
+                dir_mode = claude_dir.stat().st_mode & 0o777
+                if dir_mode not in (0o700, 0o755):
+                    console.print(f"[yellow]Fixing permissions on .claude directory (was {oct(dir_mode)})[/yellow]")
+                    os.chmod(claude_dir, 0o700)
+            
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]Error checking permissions: {e}[/red]")
+            return False
+
     def start_agent(self, agent_id: int, restart: bool = False) -> None:
         """Start or restart a single agent"""
         pane_target = self.pane_mapping.get(agent_id)
@@ -1001,6 +1160,14 @@ class ClaudeAgentFarm:
         # Navigate and start Claude Code
         # Quote the path so directories with spaces or shell metacharacters work
         tmux_send(pane_target, f"cd {shlex.quote(str(self.project_path))}")
+        
+        # CRITICAL: Wait for cd to complete before launching cc
+        time.sleep(0.5)
+        
+        # Disable PowerLevel10K instant prompt for this specific pane's shell
+        # This prevents display corruption when launching cc
+        tmux_send(pane_target, "export POWERLEVEL9K_INSTANT_PROMPT=off")
+        time.sleep(0.1)
 
         # Acquire lock before launching cc to prevent config corruption
         lock_acquired = False
@@ -1032,8 +1199,11 @@ class ClaudeAgentFarm:
                 self._release_claude_lock()
 
         # Verify Claude Code started successfully
-        max_retries = 3
+        max_retries = 5
         claude_started_successfully = False
+
+        # Give Claude Code a bit more time to fully initialize before first check
+        time.sleep(2.0)
 
         for attempt in range(max_retries):
             if not self.running:
@@ -1041,33 +1211,80 @@ class ClaudeAgentFarm:
 
             content = tmux_capture(pane_target)
 
+            # Debug log for troubleshooting startup detection
+            if attempt == 0 and len(content.strip()) > 0:
+                console.print(f"[dim]Agent {agent_id:02d}: Captured {len(content)} chars, checking readiness...[/dim]")
+                # Log key indicators for debugging
+                if "Welcome to Claude Code!" in content:
+                    console.print(f"[dim]Agent {agent_id:02d}: Found welcome message[/dim]")
+                if "│ >" in content:
+                    console.print(f"[dim]Agent {agent_id:02d}: Found prompt box[/dim]")
+                if "? for shortcuts" in content:
+                    console.print(f"[dim]Agent {agent_id:02d}: Found shortcuts hint[/dim]")
+
             # Check for various failure conditions
             if not content or len(content.strip()) < 10:
                 # Empty or nearly empty content indicates cc didn't start
                 console.print(
                     f"[yellow]Agent {agent_id:02d}: No output from Claude Code yet (attempt {attempt + 1}/{max_retries})[/yellow]"
                 )
-            elif self.monitor and (
+            elif self.monitor and self.monitor.is_claude_ready(content):
+                # Check for readiness FIRST before checking for errors
+                claude_started_successfully = True
+                break
+            elif self.monitor and len(content.strip()) > 100 and (
                 self.monitor.has_settings_error(content) or self.monitor.has_welcome_screen(content)
             ):
+                # Only check for errors if we have substantial content (>100 chars)
                 console.print(
                     f"[red]Agent {agent_id:02d}: Settings error/setup screen detected - attempting restore[/red]"
                 )
 
-                # Kill this cc instance
+                # Kill this cc instance more forcefully
+                console.print(f"[yellow]Agent {agent_id:02d}: Killing corrupted Claude Code instance...[/yellow]")
                 tmux_send(pane_target, "\x03")  # Ctrl+C
                 time.sleep(0.5)
+                tmux_send(pane_target, "\x03")  # Send Ctrl+C again to be sure
+                time.sleep(0.5)
+                
+                # Send exit command in case it's still in Claude Code
+                tmux_send(pane_target, "/exit")
+                time.sleep(1.0)
+                
+                # Wait for shell prompt to ensure Claude Code has fully exited
+                if not self._wait_for_shell_prompt(pane_target, timeout=10, ignore_shutdown=True):
+                    # If still not at shell, try harder
+                    tmux_send(pane_target, "\x03")  # Another Ctrl+C
+                    time.sleep(1.0)
+                    tmux_send(pane_target, "exit")  # Try shell exit command
+                    time.sleep(1.0)
+                
+                # NEVER EVER kill all claude-code processes! This would kill ALL working agents!
+                # Just let this specific instance clean up naturally
+                time.sleep(2.0)  # Give time for this instance to fully exit
 
                 # Try to restore from backup
                 if hasattr(self, "settings_backup_path") and self.settings_backup_path:  # noqa: SIM102
                     if self._restore_claude_settings():
                         console.print(f"[green]Settings restored for agent {agent_id} - retrying launch[/green]")
+                        # Wait a bit more to ensure everything is settled
+                        time.sleep(2.0)
+                        
                         # Return to shell and retry
-                        self._wait_for_shell_prompt(pane_target, timeout=5)
-                        tmux_send(pane_target, "cc")
-                        time.sleep(self.wait_after_cc)
-                        # Continue to next iteration to check again
-                        continue
+                        if self._wait_for_shell_prompt(pane_target, timeout=10, ignore_shutdown=True):
+                            # Re-acquire lock before retrying
+                            if self._acquire_claude_lock(timeout=10.0):
+                                try:
+                                    tmux_send(pane_target, "cc")
+                                    time.sleep(self.wait_after_cc)
+                                finally:
+                                    self._release_claude_lock()
+                                # Continue to next iteration to check again
+                                continue
+                            else:
+                                console.print(f"[red]Agent {agent_id:02d}: Could not acquire lock for retry[/red]")
+                        else:
+                            console.print(f"[red]Agent {agent_id:02d}: Could not get shell prompt for retry[/red]")
 
                 if self.monitor:
                     self.monitor.agents[agent_id]["status"] = "error"
@@ -1080,12 +1297,9 @@ class ClaudeAgentFarm:
                     self.monitor.agents[agent_id]["status"] = "error"
                     self.monitor.agents[agent_id]["errors"] += 1
                 return
-            elif self.monitor and self.monitor.is_claude_ready(content):
-                claude_started_successfully = True
-                break
             elif attempt < max_retries - 1:
                 # Make this sleep interruptible too
-                for _ in range(10):  # 2 seconds in 0.2s intervals
+                for _ in range(25):  # 5 seconds in 0.2s intervals
                     if not self.running:
                         return
                     time.sleep(0.2)
@@ -1103,6 +1317,11 @@ class ClaudeAgentFarm:
             console.print(f"[red]Agent {agent_id:02d}: Skipping prompt injection - Claude Code not ready[/red]")
             return
 
+        # Additional delay to ensure Claude Code is fully ready to receive input
+        # Even though we detected it's "ready", it may still be initializing
+        console.print(f"[dim]Agent {agent_id:02d}: Waiting 3s for Claude Code to fully initialize...[/dim]")
+        time.sleep(3.0)
+
         # Send prompt with unique seed for randomization
         seed = randint(100000, 999999)
         # Use regex to handle variations like "random chunks of 50 lines"
@@ -1114,13 +1333,24 @@ class ClaudeAgentFarm:
             flags=re.IGNORECASE,
         )
 
-        # Send prompt line by line
-        for line in salted_prompt.splitlines():
-            tmux_send(pane_target, line, enter=False)
-            tmux_send(pane_target, "", enter=True)
+        # Send prompt as a single message
+        # CRITICAL: Use tmux's literal mode to send the entire prompt correctly
+        # This avoids complex line-by-line sending that can cause issues
+        console.print(f"[dim]Agent {agent_id:02d}: Sending {len(salted_prompt)} char prompt...[/dim]")
+        
+        # Send the entire prompt at once using literal mode
+        tmux_send(pane_target, salted_prompt, enter=True)
 
         if not restart:
             console.print(f"[green]✓ Agent {agent_id:02d}: prompt injected[/green]")
+
+        # Verify prompt was received by checking for working state
+        time.sleep(2.0)  # Give Claude a moment to start processing
+        verify_content = tmux_capture(pane_target)
+        if self.monitor and self.monitor.is_claude_working(verify_content):
+            console.print(f"[green]✓ Agent {agent_id:02d}: Claude Code is processing the prompt[/green]")
+        else:
+            console.print(f"[yellow]⚠ Agent {agent_id:02d}: Claude Code may not have received the prompt properly[/yellow]")
 
         if self.monitor:
             self.monitor.agents[agent_id]["status"] = "starting"
@@ -1243,6 +1473,9 @@ class ClaudeAgentFarm:
 
         # Backup Claude settings before starting
         self.settings_backup_path = self._backup_claude_settings()
+        
+        # Check current permissions are correct
+        self._check_claude_permissions()
 
         try:
             # Execute workflow steps
@@ -1359,8 +1592,9 @@ class ClaudeAgentFarm:
 # ─────────────────────────────── CLI Entry Point ──────────────────────────── #
 
 
-@app.command()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     path: str = typer.Option(..., "--path", help="Absolute path to project root", rich_help_panel="Required Arguments"),
     agents: int = typer.Option(
         20, "--agents", "-n", help="Number of Claude agents", rich_help_panel="Agent Configuration"
@@ -1369,10 +1603,10 @@ def main(
         "claude_agents", "--session", "-s", help="tmux session name", rich_help_panel="Agent Configuration"
     ),
     stagger: float = typer.Option(
-        4.0, "--stagger", help="Seconds between starting agents", rich_help_panel="Timing Configuration"
+        10.0, "--stagger", help="Seconds between starting agents", rich_help_panel="Timing Configuration"
     ),
     wait_after_cc: float = typer.Option(
-        3.0, "--wait-after-cc", help="Seconds to wait after launching cc", rich_help_panel="Timing Configuration"
+        15.0, "--wait-after-cc", help="Seconds to wait after launching cc", rich_help_panel="Timing Configuration"
     ),
     check_interval: int = typer.Option(
         10, "--check-interval", help="Seconds between agent health checks", rich_help_panel="Timing Configuration"
@@ -1425,6 +1659,9 @@ def main(
     fast_start: bool = typer.Option(
         False, "--fast-start", help="Skip shell prompt checking", rich_help_panel="Advanced Options"
     ),
+    full_backup: bool = typer.Option(
+        False, "--full-backup", help="Perform a full backup before starting", rich_help_panel="Advanced Options"
+    ),
 ) -> None:
     """
     Claude Code Agent Farm - Parallel code fixing automation
@@ -1432,6 +1669,9 @@ def main(
     This tool orchestrates multiple Claude Code agents working in parallel
     to fix type-checker and linter problems in your codebase.
     """
+    # If a subcommand was invoked, don't run the main logic
+    if ctx.invoked_subcommand is not None:
+        return
 
     # Validate project path
     project_path = Path(path).expanduser().resolve()
@@ -1470,6 +1710,7 @@ def main(
         tmux_kill_on_exit=tmux_kill_on_exit,
         tmux_mouse=tmux_mouse,
         fast_start=fast_start,
+        full_backup=full_backup,
     )
 
     try:
@@ -1485,7 +1726,7 @@ def main(
         farm.shutdown()
 
 
-@app.command(name="monitor-only")
+@app.command(name="monitor-only", hidden=True)
 def monitor_only(
     path: str = typer.Option(..., "--path", help="Absolute path to project root"),
     session: str = typer.Option("claude_agents", "--session", "-s", help="tmux session name"),

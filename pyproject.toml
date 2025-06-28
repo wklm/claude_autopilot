@@ -117,6 +117,7 @@ ignore = [
     "B008",  # Do not perform function calls in argument defaults
     "A003",  # Class attribute shadowing builtin
     "SIM108", # Use ternary operator (sometimes less readable)
+    "W293", # Blank line contains whitespace
 ]
 
 [tool.ruff.format]

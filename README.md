@@ -140,8 +140,8 @@ Think of it like this:
 # Activate environment (if not using direnv)
 source .venv/bin/activate
 
-# Run with default settings (20 agents)
-claude-code-agent-farm --path /path/to/your/typescript/project
+# Run with sample settings (20 agents)
+claude-code-agent-farm --path /path/to/your/typescript/project --config configs/sample.json
 ```
 
 ### Common Usage Patterns
@@ -161,6 +161,17 @@ claude-code-agent-farm --path /your/project --skip-regenerate --skip-commit
 
 # Use custom configuration
 claude-code-agent-farm --path /your/project --config configs/production.json
+
+# Enable all convenience features
+claude-code-agent-farm \
+  --path /your/project \
+  --agents 12 \
+  --auto-restart \
+  --tmux-mouse \
+  --attach
+
+# At any time, drop into the dashboard only
+./view_agents.sh
 ```
 
 ### Viewing Your Agents
@@ -244,6 +255,15 @@ Features:
 Advanced:
   --prompt-file PATH      Custom prompt file
   --config PATH           JSON configuration file
+  --context-threshold N    Restart agent when context ≤ N% (default: 20)
+  --idle-timeout SECONDS   Mark agent idle after N seconds (default: 60)
+  --max-errors N           Disable agent after N errors (default: 3)
+  --tmux-kill-on-exit      Kill tmux session on exit (default: true)
+  --no-tmux-kill-on-exit   Keep tmux session running after exit
+  --tmux-mouse             Enable tmux mouse support (default: true)
+  --no-tmux-mouse          Disable tmux mouse support
+  --fast-start             Skip shell prompt detection
+  --full-backup            Full backup of Claude settings before start
 ```
 
 ### Configuration Files
