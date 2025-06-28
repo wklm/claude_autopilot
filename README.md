@@ -141,26 +141,26 @@ Think of it like this:
 source .venv/bin/activate
 
 # Run with default settings (20 agents)
-claude-agent-farm --path /path/to/your/typescript/project
+claude-code-agent-farm --path /path/to/your/typescript/project
 ```
 
 ### Common Usage Patterns
 
 ```bash
 # Quick test with 5 agents
-claude-agent-farm --path /your/project -n 5 --skip-regenerate
+claude-code-agent-farm --path /your/project -n 5 --skip-regenerate
 
 # Production run with auto-restart
-claude-agent-farm --path /your/project --auto-restart --agents 20
+claude-code-agent-farm --path /your/project --auto-restart --agents 20
 
 # Headless mode (no monitoring)
-claude-agent-farm --path /your/project --no-monitor --auto-restart
+claude-code-agent-farm --path /your/project --no-monitor --auto-restart
 
 # Skip git operations for faster iteration
-claude-agent-farm --path /your/project --skip-regenerate --skip-commit
+claude-code-agent-farm --path /your/project --skip-regenerate --skip-commit
 
 # Use custom configuration
-claude-agent-farm --path /your/project --config configs/production.json
+claude-code-agent-farm --path /your/project --config configs/production.json
 ```
 
 ### Viewing Your Agents
@@ -304,7 +304,7 @@ Create reusable configurations in JSON:
 - **tmux_kill_on_exit**: Kill tmux session on orchestrator exit
 - **tmux_mouse**: Enable mouse support in tmux
 
-Use with: `claude-agent-farm --path /your/project --config configs/my-config.json`
+Use with: `claude-code-agent-farm --path /your/project --config configs/my-config.json`
 
 ## 🔄 How It Works
 
@@ -393,10 +393,10 @@ tmux kill-server
 
 ```bash
 # Terminal 1
-claude-agent-farm --path /project1 --session project1-agents
+claude-code-agent-farm --path /project1 --session project1-agents
 
 # Terminal 2
-claude-agent-farm --path /project2 --session project2-agents
+claude-code-agent-farm --path /project2 --session project2-agents
 ```
 
 ### Custom Prompts
@@ -404,7 +404,7 @@ claude-agent-farm --path /project2 --session project2-agents
 Create a custom prompt file:
 ```bash
 echo "Your custom instructions..." > prompts/my-prompt.txt
-claude-agent-farm --path /project --prompt-file prompts/my-prompt.txt
+claude-code-agent-farm --path /project --prompt-file prompts/my-prompt.txt
 ```
 
 ### Automated/Cron Usage
@@ -414,7 +414,7 @@ For unattended operation:
 #!/bin/bash
 cd /path/to/agent-farm
 source .venv/bin/activate
-claude-agent-farm \
+claude-code-agent-farm \
   --path /project \
   --agents 10 \
   --no-monitor \

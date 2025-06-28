@@ -63,3 +63,4 @@ dmypy.json
 # Claude Agent Farm state files
 .claude_agent_farm_state.json
 .claude_agent_farm_state.tmp
+.ruff_cache/

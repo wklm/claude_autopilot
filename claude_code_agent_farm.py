@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from random import randint
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import typer
@@ -68,24 +68,27 @@ def run(cmd: str, *, check: bool = True, quiet: bool = False, capture: bool = Fa
         console.log(cmd, style="cyan")
 
     # Parse command for shell safety when possible
+    cmd_arg: Union[str, List[str]]
     try:
         # Try to parse as a list of arguments for safer execution
         cmd_list = shlex.split(cmd)
         use_shell = False
+        cmd_arg = cmd_list
     except ValueError:
         # Fall back to shell=True for complex commands with pipes, redirects, etc.
-        cmd_list = cmd
+        cmd_list = []  # Not used when shell=True
         use_shell = True
+        cmd_arg = cmd
 
     if capture:
-        result = subprocess.run(cmd_list, shell=use_shell, capture_output=True, text=True, check=check)
+        result = subprocess.run(cmd_arg, shell=use_shell, capture_output=True, text=True, check=check)
         return result.returncode, result.stdout or "", result.stderr or ""
     else:
         # Stream output to terminal when not capturing
         stdout_pipe = subprocess.DEVNULL if quiet else None
         stderr_pipe = subprocess.DEVNULL if quiet else subprocess.STDOUT
         try:
-            result = subprocess.run(cmd_list, shell=use_shell, check=check, stdout=stdout_pipe, stderr=stderr_pipe, text=True)
+            result = subprocess.run(cmd_arg, shell=use_shell, check=check, stdout=stdout_pipe, stderr=stderr_pipe, text=True)
             return result.returncode, "", ""
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Command failed with exit code {e.returncode}: {cmd}[/red]")
@@ -100,7 +103,15 @@ def line_count(file_path: Path) -> int:
             with file_path.open("r", encoding="utf-8") as f:
                 return sum(1 for _ in f)
         except UnicodeDecodeError:
-            with file_path.open("r", encoding="latin-1") as f:
+            # Try common encodings
+            for encoding in ["latin-1", "cp1252", "iso-8859-1"]:
+                try:
+                    with file_path.open("r", encoding=encoding) as f:
+                        return sum(1 for _ in f)
+                except UnicodeDecodeError:
+                    continue
+            # Last resort: ignore errors
+            with file_path.open("r", encoding="utf-8", errors="ignore") as f:
                 return sum(1 for _ in f)
     except Exception as e:
         console.print(f"[yellow]Warning: Could not count lines in {file_path}: {e}[/yellow]")
@@ -172,6 +183,8 @@ class AgentMonitor:
                 "last_context": 100,
                 "errors": 0,
                 "last_activity": datetime.now(),
+                "restart_count": 0,
+                "last_restart": None,
             }
 
     def detect_context_percentage(self, content: str) -> Optional[int]:
@@ -347,6 +360,13 @@ class ClaudeAgentFarm:
         self.tmux_kill_on_exit = tmux_kill_on_exit
         self.tmux_mouse = tmux_mouse
 
+        # Validate session name (tmux has restrictions)
+        if not re.match(r'^[a-zA-Z0-9_-]+$', self.session):
+            raise ValueError(
+                f"Invalid tmux session name '{self.session}'. "
+                "Use only letters, numbers, hyphens, and underscores."
+            )
+
         # Apply config file if provided
         if config:
             self._load_config(config)
@@ -426,13 +446,17 @@ class ClaudeAgentFarm:
                 tmpfile.flush()
 
                 # Run type-check
-                subprocess.run("bun run type-check", shell=True, stdout=tmpfile, stderr=subprocess.STDOUT)
+                subprocess.run(["bun", "run", "type-check"],
+                              stdout=tmpfile, stderr=subprocess.STDOUT,
+                              cwd=self.project_path)
 
                 tmpfile.write("\n\n$ bun run lint\n")
                 tmpfile.flush()
 
                 # Run lint
-                subprocess.run("bun run lint", shell=True, stdout=tmpfile, stderr=subprocess.STDOUT)
+                subprocess.run(["bun", "run", "lint"],
+                              stdout=tmpfile, stderr=subprocess.STDOUT,
+                              cwd=self.project_path)
 
                 tmpfile_path = Path(tmpfile.name)
 
@@ -469,6 +493,13 @@ class ClaudeAgentFarm:
             return
 
         # Check for uncommitted changes
+        # First, check if the problems file exists and has changes
+        if self.combined_file.exists():
+            ret, stdout, _ = run(f"git diff --name-only {shlex.quote(str(self.combined_file))}",
+                               capture=True, quiet=True)
+            if stdout.strip():
+                console.print(f"[yellow]Warning: {self.combined_file.name} has uncommitted changes that will be committed[/yellow]")
+
         ret, stdout, _ = run("git status --porcelain", capture=True, quiet=True)
         if stdout.strip():
             console.print("[yellow]You have uncommitted changes:[/yellow]")
@@ -558,17 +589,20 @@ class ClaudeAgentFarm:
         if restart:
             # Exit current session
             tmux_send(pane_target, "/exit")
-            # Wait for shell prompt to appear (max 5 seconds)
-            for _ in range(5):
+            # Wait for shell prompt to appear (max 10 seconds - zsh with heavy plugins can be slow)
+            for _ in range(10):
                 time.sleep(1)
                 content = tmux_capture(pane_target)
-                if "$" in content or "%" in content or ">" in content:
+                # More robust prompt detection - look for common prompt endings
+                lines = content.strip().splitlines()
+                if lines and re.search(r'[\$%>#]\s*$', lines[-1]):
                     break
             if self.monitor:
                 self.monitor.agents[agent_id]["cycles"] += 1
 
         # Navigate and start Claude Code
-        tmux_send(pane_target, f"cd {self.project_path}")
+        # Quote the path so directories with spaces or shell metacharacters work
+        tmux_send(pane_target, f"cd {shlex.quote(str(self.project_path))}")
         tmux_send(pane_target, "cc")
 
         if not restart:
@@ -653,8 +687,23 @@ class ClaudeAgentFarm:
 
                         # Auto-restart if needed
                         if self.auto_restart and self.monitor.needs_restart(agent_id):
-                            console.print(f"[yellow]Restarting agent {agent_id}...[/yellow]")
+                            agent = self.monitor.agents[agent_id]
+
+                            # Implement exponential backoff
+                            if agent["last_restart"]:
+                                time_since_restart = (datetime.now() - agent["last_restart"]).total_seconds()
+                                backoff_time = min(300, 10 * (2 ** agent["restart_count"]))  # Max 5 min
+
+                                if time_since_restart < backoff_time:
+                                    continue  # Skip restart, still in backoff period
+
+                            console.print(f"[yellow]Restarting agent {agent_id} (attempt #{agent['restart_count'] + 1})...[/yellow]")
                             self.start_agent(agent_id, restart=True)
+
+                            # Update restart tracking
+                            agent["restart_count"] += 1
+                            agent["last_restart"] = datetime.now()
+                            self.monitor.agents[agent_id] = agent
 
                 # Write state to file for monitor process
                 self.write_monitor_state()
@@ -742,6 +791,7 @@ class ClaudeAgentFarm:
                 **a,
                 "start_time": a["start_time"].isoformat(),
                 "last_activity": a["last_activity"].isoformat(),
+                "last_restart": a["last_restart"].isoformat() if a.get("last_restart") is not None else None,
             }
 
         state_data = {
@@ -918,8 +968,17 @@ def monitor_only(
         while True:
             try:
                 if state_file.exists():
-                    with state_file.open() as f:
-                        state_data = json.load(f)
+                    # Use file locking when reading to avoid race conditions
+                    try:
+                        with state_file.open() as f:
+                            # Try to acquire shared lock (non-exclusive)
+                            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                            try:
+                                state_data = json.load(f)
+                            finally:
+                                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    except (IOError, OSError) as e:
+                        raise Exception(f"Failed to read state file: {e}") from e
 
                     # Recreate table from state data
                     table = Table(title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}")

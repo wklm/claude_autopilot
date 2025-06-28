@@ -57,7 +57,7 @@ all = [
 ]
 
 [project.scripts]
-claude-agent-farm = "claude_code_agent_farm:app"
+claude-code-agent-farm = "claude_code_agent_farm:app"
 
 [project.urls]
 Homepage = "https://github.com/Dicklesworthstone/claude_code_agent_farm"
@@ -67,7 +67,7 @@ Documentation = "https://github.com/Dicklesworthstone/claude_code_agent_farm#rea
 
 # Configure Hatchling
 [tool.hatch.build.targets.wheel]
-packages = ["claude_code_agent_farm"]
+packages = ["claude_code_agent_farm.py"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -165,4 +165,4 @@ exclude_lines = [
 
 # --- uv specific configuration ---
 [tool.uv]
-# uv will use the Python version from requires-python by default
+package = true

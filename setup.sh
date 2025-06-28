@@ -249,6 +249,13 @@ check_cc_status() {
 # Configure cc alias
 configure_cc_alias() {
     local alias_cmd='alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"'
+    
+    # Get shell info early to ensure shell_rc is always defined
+    local shell_info=$(detect_shell)
+    local shell_type="${shell_info%|*}"
+    local shell_rc="${shell_info#*|}"
+    
+    # Now check cc status
     local cc_status=$(check_cc_status)
     
     case "$cc_status" in
@@ -299,11 +306,6 @@ configure_cc_alias() {
     
     # Ask about persisting to shell rc file
     echo ""
-    # Detect shell rc file
-    local shell_info=$(detect_shell)
-    local shell_type="${shell_info%|*}"
-    local shell_rc="${shell_info#*|}"
-    
     if [ "$shell_type" = "" ] || [ "$shell_type" = "unknown" ]; then
         print_warning "Could not detect shell type. Please add the alias manually to your shell rc file."
         return
@@ -312,8 +314,13 @@ configure_cc_alias() {
     if prompt_yes_no "Do you want to add this alias to your $shell_rc file?"; then
         # Check if alias already exists
         if grep -q "alias cc=" "$shell_rc" 2>/dev/null; then
-            # Comment out old alias
-            sed -i.bak 's/^alias cc=/#&/' "$shell_rc" && rm -f "$shell_rc.bak"
+            # Create backup before modification
+            cp "$shell_rc" "$shell_rc.backup.$(date +%Y%m%d_%H%M%S)"
+            print_success "Created backup at $shell_rc.backup.$(date +%Y%m%d_%H%M%S)"
+            
+            # Comment out old alias (keeping the backup)
+            sed -i.bak 's/^alias cc=/#&/' "$shell_rc"
+            print_warning "Previous cc alias has been commented out"
         fi
         
         # Add new alias if not already present
@@ -441,7 +448,7 @@ EOF
     echo "   # Or just 'cd' into this directory if using direnv"
     echo ""
     echo "2. Run the agent farm:"
-    echo "   claude-agent-farm --path /your/project/path"
+    echo "   claude-code-agent-farm --path /your/project/path"
     echo ""
     echo "3. View agents in another terminal:"
     echo "   ./view_agents.sh"
