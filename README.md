@@ -24,11 +24,24 @@ Claude Code Agent Farm is a powerful orchestration tool that runs multiple Claud
 
 - **Python 3.13+** (managed by `uv`)
 - **tmux** (for terminal multiplexing)
-- **Claude Code** (`cc` command installed and configured)
+- **Claude Code** (`claude` command installed and configured)
 - **git** (for version control)
 - **bun** (for your TypeScript project)
 - **direnv** (optional but recommended for auto-environment activation)
 - **uv** (modern Python package manager)
+
+### Important: The `cc` Alias
+
+The agent farm requires a special `cc` alias to launch Claude Code with the necessary permissions:
+
+```bash
+alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"
+```
+
+This alias:
+- Enables background tasks for Claude Code agents
+- Skips permission prompts that would block automation
+- **Will be configured automatically by the setup script**
 
 ## 🚀 Quick Start
 
@@ -51,6 +64,7 @@ This will:
 - Create a Python 3.13 virtual environment
 - Install all dependencies
 - Set up direnv for auto-activation
+- Configure the `cc` alias (with your confirmation)
 - Create sample configuration files
 - Make scripts executable
 
@@ -69,6 +83,11 @@ uv sync --all-extras
 # Create .envrc for direnv
 echo 'source .venv/bin/activate' > .envrc
 direnv allow
+
+# Configure the cc alias
+alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"
+# Add to your shell rc file (~/.bashrc or ~/.zshrc):
+echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> ~/.bashrc
 
 # Make scripts executable
 chmod +x view_agents.sh
@@ -225,57 +244,61 @@ Advanced:
 
 ### Configuration Files
 
-Create reusable configurations in JSON (note that comments aren't permitted in JSON, so remove those!)
+Create reusable configurations in JSON:
 
 ```json
 {
-    // Project Configuration
-    "path": "/data/projects/smartedgar-frontend",  // Project root directory
-    
-    // Agent Configuration
-    "agents": 20,                    // Number of Claude Code agents to run
-    "session": "claude_agents",      // tmux session name
-    
-    // Timing Configuration (in seconds)
-    "stagger": 4.0,                  // Delay between starting each agent
-    "wait_after_cc": 3.0,           // Wait time after launching cc before sending prompt
-    "check_interval": 10,            // How often to check agent health
-    
-    // Feature Flags
-    "skip_regenerate": false,        // Skip regenerating the problems file
-    "skip_commit": false,           // Skip git commit/push step
-    "auto_restart": true,           // Automatically restart agents on completion/error
-    "no_monitor": false,            // Disable monitoring (just launch and exit)
-    "attach": false,                // Attach to tmux session after setup
-    
-    // Advanced Options
-    "prompt_file": null,            // Path to custom prompt file (null = use default)
-    
-    // You can also override the default prompt inline (not recommended for long prompts)
-    // "prompt_text": "Your custom prompt here...",
-    
-    // Additional settings for fine-tuning
-    "context_threshold": 20,        // Restart when context drops below this percentage
-    "idle_timeout": 60,             // Seconds before marking an agent as idle
-    "max_errors": 3,                // Maximum errors before disabling an agent
-    
-    // Logging and debugging
-    "verbose": false,               // Enable verbose logging
-    "log_file": null,              // Path to log file (null = console only)
-    
-    // Git configuration
-    "git_branch": null,            // Specific branch to use (null = current branch)
-    "git_remote": "origin",        // Git remote to push to
-    
-    // Performance tuning
-    "batch_size": 50,              // Lines per batch in the prompt
-    "max_agents": 50,              // Safety limit on maximum agents
-    
-    // tmux specific settings
-    "tmux_kill_on_exit": true,     // Kill tmux session on orchestrator exit
-    "tmux_mouse": true             // Enable mouse support in tmux
-  }
+    "path": "/data/projects/smartedgar-frontend",
+    "agents": 20,
+    "session": "claude_agents",
+    "stagger": 4.0,
+    "wait_after_cc": 3.0,
+    "check_interval": 10,
+    "skip_regenerate": false,
+    "skip_commit": false,
+    "auto_restart": true,
+    "no_monitor": false,
+    "attach": false,
+    "prompt_file": "prompts/bug_fixing_prompt_for_nextjs.txt",
+    "context_threshold": 20,
+    "idle_timeout": 60,
+    "max_errors": 3,
+    "verbose": false,
+    "log_file": null,
+    "git_branch": null,
+    "git_remote": "origin",
+    "batch_size": 50,
+    "max_agents": 50,
+    "tmux_kill_on_exit": true,
+    "tmux_mouse": true
+}
 ```
+
+#### Configuration Options Explained:
+
+- **path**: Project root directory
+- **agents**: Number of Claude Code agents to run
+- **session**: tmux session name
+- **stagger**: Delay between starting each agent (seconds)
+- **wait_after_cc**: Wait time after launching cc before sending prompt
+- **check_interval**: How often to check agent health
+- **skip_regenerate**: Skip regenerating the problems file
+- **skip_commit**: Skip git commit/push step
+- **auto_restart**: Automatically restart agents on completion/error
+- **no_monitor**: Disable monitoring (just launch and exit)
+- **attach**: Attach to tmux session after setup
+- **prompt_file**: Path to custom prompt file (null = use default)
+- **context_threshold**: Restart when context drops below this percentage
+- **idle_timeout**: Seconds before marking an agent as idle
+- **max_errors**: Maximum errors before disabling an agent
+- **verbose**: Enable verbose logging
+- **log_file**: Path to log file (null = console only)
+- **git_branch**: Specific branch to use (null = current branch)
+- **git_remote**: Git remote to push to
+- **batch_size**: Lines per batch in the prompt
+- **max_agents**: Safety limit on maximum agents
+- **tmux_kill_on_exit**: Kill tmux session on orchestrator exit
+- **tmux_mouse**: Enable mouse support in tmux
 
 Use with: `claude-agent-farm --path /your/project --config configs/my-config.json`
 
@@ -327,10 +350,11 @@ Each agent receives instructions to:
 - Ensure Claude Code works when run manually
 
 #### Agents not starting
-- Verify `cc` command works: `which cc`
+- Verify `cc` alias is configured: `alias | grep cc`
+- If not, run: `alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"`
 - Check Claude Code is configured with valid API key
 - Try running `cc` manually first
-- Increase `--wait-after-cc` if CC loads slowly
+- Increase `--wait-after-cc` if Claude Code loads slowly
 
 #### High memory usage
 - Each agent uses ~500MB RAM

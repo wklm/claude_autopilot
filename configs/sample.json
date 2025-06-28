@@ -1,34 +1,25 @@
 {
-    "path": "/data/projects/smartedgar-frontend", 
-    
-    "agents": 20,                    
-    "session": "claude_agents",      
-    
-    "stagger": 4.0,                  
-    "wait_after_cc": 3.0,           
-    "check_interval": 10,            
-    
-    "skip_regenerate": false,        
-    "skip_commit": false,           
-    "auto_restart": true,           
-    "no_monitor": false,            
-    "attach": false,                
-    
-    "prompt_file": "prompts/bug_fixing_prompt_for_nextjs.txt",            
-    
-    "context_threshold": 15,        
-    "idle_timeout": 60,             
-    "max_errors": 3,                
-    
-    "verbose": false,               
-    "log_file": null,              
-    
-    "git_branch": null,            
-    "git_remote": "origin",        
-    
-    "batch_size": 50,              
-    "max_agents": 50,              
-    
-    "tmux_kill_on_exit": true,     
-    "tmux_mouse": true             
+    "comment": "Set 'path' to your project directory when using this config",
+    "agents": 20,
+    "session": "claude_agents",
+    "stagger": 4.0,
+    "wait_after_cc": 3.0,
+    "check_interval": 10,
+    "skip_regenerate": false,
+    "skip_commit": false,
+    "auto_restart": true,
+    "no_monitor": false,
+    "attach": false,
+    "prompt_file": "prompts/bug_fixing_prompt_for_nextjs.txt",
+    "context_threshold": 20,
+    "idle_timeout": 60,
+    "max_errors": 3,
+    "verbose": false,
+    "log_file": null,
+    "git_branch": null,
+    "git_remote": "origin",
+    "batch_size": 50,
+    "max_agents": 50,
+    "tmux_kill_on_exit": true,
+    "tmux_mouse": true
 }

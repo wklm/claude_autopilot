@@ -35,8 +35,13 @@ print_color "${GREEN}Tip: Press Ctrl+B then D to detach${NC}\n"
 print_color "\n"
 
 # Portable prompt
-print_color "Choose mode [1-4]: "
-read choice
+if [ -t 0 ]; then
+    print_color "Choose mode [1-4]: "
+    read -r choice
+else
+    # Non-interactive mode (e.g., CI/SSH) - default to quick attach
+    choice=4
+fi
 
 case "$choice" in
     1)

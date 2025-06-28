@@ -27,61 +27,297 @@ print_error() {
     echo -e "${RED}✗${NC} $1"
 }
 
-# Check for required tools
-check_requirements() {
-    local missing_tools=()
+# Function to prompt for yes/no
+prompt_yes_no() {
+    local prompt="$1"
+    local response
     
-    # Check for uv
-    if ! command -v uv &> /dev/null; then
-        missing_tools+=("uv")
+    while true; do
+        echo -n -e "${YELLOW}?${NC} $prompt [y/N] "
+        read -r response
+        case "$response" in
+            [yY][eE][sS]|[yY]) return 0 ;;
+            [nN][oO]|[nN]|"") return 1 ;;
+            *) print_warning "Please answer yes or no." ;;
+        esac
+    done
+}
+
+# Detect OS type
+detect_os() {
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if [ -f /etc/debian_version ]; then
+            echo "debian"
+        elif [ -f /etc/redhat-release ]; then
+            echo "redhat"
+        else
+            echo "linux"
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    else
+        echo "unknown"
     fi
+}
+
+# Install tool based on OS
+install_tool() {
+    local tool="$1"
+    local os_type=$(detect_os)
     
-    # Check for direnv
-    if ! command -v direnv &> /dev/null; then
-        missing_tools+=("direnv")
-    fi
-    
-    # Check for tmux
-    if ! command -v tmux &> /dev/null; then
-        missing_tools+=("tmux")
-    fi
-    
-    # Check for git
-    if ! command -v git &> /dev/null; then
-        missing_tools+=("git")
-    fi
-    
-    # Check for bun (required for the TypeScript project)
-    if ! command -v bun &> /dev/null; then
-        missing_tools+=("bun")
-    fi
-    
-    if [ ${#missing_tools[@]} -ne 0 ]; then
-        print_error "Missing required tools: ${missing_tools[*]}"
-        echo ""
-        echo "Installation instructions:"
-        
-        for tool in "${missing_tools[@]}"; do
-            case $tool in
-                "uv")
-                    echo "  - uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    case $tool in
+        "uv")
+            print_status "Installing uv..."
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            ;;
+        "direnv")
+            case $os_type in
+                "debian")
+                    sudo apt update && sudo apt install -y direnv
                     ;;
-                "direnv")
-                    echo "  - direnv: https://direnv.net/docs/installation.html"
+                "macos")
+                    brew install direnv
                     ;;
-                "tmux")
-                    echo "  - tmux: sudo apt install tmux (Ubuntu) or brew install tmux (macOS)"
-                    ;;
-                "bun")
-                    echo "  - bun: curl -fsSL https://bun.sh/install | bash"
-                    ;;
-                "git")
-                    echo "  - git: sudo apt install git (Ubuntu) or brew install git (macOS)"
+                *)
+                    print_error "Please install direnv manually: https://direnv.net/docs/installation.html"
+                    return 1
                     ;;
             esac
-        done
+            ;;
+        "tmux")
+            case $os_type in
+                "debian")
+                    sudo apt update && sudo apt install -y tmux
+                    ;;
+                "macos")
+                    brew install tmux
+                    ;;
+                "redhat")
+                    sudo yum install -y tmux
+                    ;;
+                *)
+                    print_error "Please install tmux manually for your OS"
+                    return 1
+                    ;;
+            esac
+            ;;
+        "git")
+            case $os_type in
+                "debian")
+                    sudo apt update && sudo apt install -y git
+                    ;;
+                "macos")
+                    brew install git
+                    ;;
+                "redhat")
+                    sudo yum install -y git
+                    ;;
+                *)
+                    print_error "Please install git manually for your OS"
+                    return 1
+                    ;;
+            esac
+            ;;
+        "bun")
+            print_status "Installing bun..."
+            curl -fsSL https://bun.sh/install | bash
+            # Add bun to PATH for current session
+            export BUN_INSTALL="$HOME/.bun"
+            export PATH="$BUN_INSTALL/bin:$PATH"
+            print_warning "Bun installed. You may need to restart your shell or run:"
+            echo "  export PATH=\"\$HOME/.bun/bin:\$PATH\""
+            ;;
+    esac
+}
+
+# Check for required tools with installation offers
+check_requirements() {
+    local missing_tools=()
+    local tool_status=0
+    
+    # Check each tool
+    for tool in uv direnv tmux git bun; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    print_warning "Missing tools: ${missing_tools[*]}"
+    echo ""
+    
+    # Offer to install each missing tool
+    for tool in "${missing_tools[@]}"; do
+        if prompt_yes_no "Would you like to install $tool?"; then
+            if install_tool "$tool"; then
+                print_success "$tool installed successfully"
+                # Note: New tools might require a new shell or sourcing config
+                print_warning "You may need to open a new terminal or run 'source ~/.bashrc' to use $tool"
+            else
+                print_error "Failed to install $tool"
+                tool_status=1
+            fi
+        else
+            print_warning "Skipping $tool installation"
+            tool_status=1
+        fi
+    done
+    
+    return $tool_status
+}
+
+# Check existing cc alias/command
+check_cc_status() {
+    local cc_type=""
+    local cc_content=""
+    
+    # First check shell rc files for alias (more reliable than alias command)
+    local shell_rc=""
+    local shell_type=""
+    
+    # Detect shell type more reliably
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [ -n "${BASH_VERSION:-}" ]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    elif [[ "$SHELL" =~ zsh ]]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [[ "$SHELL" =~ bash ]]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    else
+        shell_type="unknown"
+    fi
+    
+    if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+        if grep -q "alias cc=.*ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions" "$shell_rc" 2>/dev/null; then
+            cc_type="claude_correct"
+            echo "$cc_type"
+            return
+        elif grep -q "alias cc=" "$shell_rc" 2>/dev/null; then
+            cc_type="alias_other"
+            echo "$cc_type"
+            return
+        fi
+    fi
+    
+    # Check if cc is a command
+    if command -v cc &>/dev/null; then
+        # Check if it's the C compiler
+        if cc --version 2>&1 | grep -qE "(gcc|clang|cc)"; then
+            cc_type="c_compiler"
+        else
+            cc_type="command_other"
+        fi
+    else
+        cc_type="none"
+    fi
+    
+    echo "$cc_type"
+}
+
+# Configure cc alias
+configure_cc_alias() {
+    local alias_cmd='alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"'
+    local cc_status=$(check_cc_status)
+    
+    case "$cc_status" in
+        "claude_correct")
+            print_success "The 'cc' alias is already correctly configured for Claude Code"
+            return 0
+            ;;
+        "c_compiler")
+            print_warning "The 'cc' command is currently the C compiler"
+            echo "Setting the cc alias for Claude Code will shadow the C compiler command."
+            echo "You would need to use '/usr/bin/cc' or 'gcc' directly to compile C code."
+            if ! prompt_yes_no "Do you want to proceed with setting the cc alias?"; then
+                print_warning "Keeping cc as the C compiler. You'll need to use a different alias for Claude Code."
+                return 1
+            fi
+            ;;
+        "alias_other")
+            print_warning "The 'cc' alias already exists but points to something else"
+            if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+                current_alias=$(grep "^alias cc=" "$shell_rc" | head -1)
+                echo "Current alias in $shell_rc: $current_alias"
+            fi
+            if ! prompt_yes_no "Do you want to update it to Claude Code?"; then
+                print_warning "Keeping existing alias. You'll need to use a different alias for Claude Code."
+                return 1
+            fi
+            ;;
+        "command_other")
+            print_warning "The 'cc' command exists but is not the C compiler"
+            if ! prompt_yes_no "Do you want to create an alias that shadows this command?"; then
+                return 1
+            fi
+            ;;
+        "none")
+            print_status "The 'cc' command/alias is not currently set up"
+            echo "The agent farm requires a 'cc' alias that runs:"
+            echo "  $alias_cmd"
+            if ! prompt_yes_no "Do you want to set up this alias?"; then
+                print_warning "Skipping cc alias setup. You'll need to configure it manually."
+                return 1
+            fi
+            ;;
+    esac
+    
+    # Set alias for current session
+    eval "$alias_cmd"
+    print_success "Alias set for current session"
+    
+    # Ask about persisting to shell rc file
+    echo ""
+    # Detect shell rc file
+    local shell_rc=""
+    local shell_type=""
+    
+    # Detect shell type more reliably
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [ -n "${BASH_VERSION:-}" ]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    elif [[ "$SHELL" =~ zsh ]]; then
+        shell_type="zsh"
+        shell_rc="$HOME/.zshrc"
+    elif [[ "$SHELL" =~ bash ]]; then
+        shell_type="bash"
+        shell_rc="$HOME/.bashrc"
+    else
+        print_warning "Could not detect shell type. Please add the alias manually to your shell rc file."
+        return
+    fi
+    
+    if prompt_yes_no "Do you want to add this alias to your $shell_rc file?"; then
+        # Check if alias already exists
+        if grep -q "alias cc=" "$shell_rc" 2>/dev/null; then
+            # Comment out old alias
+            sed -i.bak 's/^alias cc=/#&/' "$shell_rc" && rm -f "$shell_rc.bak"
+        fi
         
-        exit 1
+        # Add new alias if not already present
+        if ! grep -q "ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions" "$shell_rc" 2>/dev/null; then
+            echo "" >> "$shell_rc"
+            echo "# Claude Code alias for agent farm" >> "$shell_rc"
+            echo "$alias_cmd" >> "$shell_rc"
+            print_success "Added cc alias to $shell_rc"
+        else
+            print_success "Claude Code alias already in $shell_rc"
+        fi
+        
+        echo ""
+        print_warning "You'll need to reload your shell or run: source $shell_rc"
+    else
+        print_warning "Alias not persisted. You'll need to set it manually each session."
     fi
 }
 
@@ -92,13 +328,27 @@ main() {
     
     # Check requirements
     print_status "Checking requirements..."
-    check_requirements
+    if ! check_requirements; then
+        print_error "Missing required tools. Please install them and run setup again."
+        exit 1
+    fi
     print_success "All required tools found"
     
-    # Create virtual environment
-    print_status "Creating Python 3.13 virtual environment..."
-    uv venv --python 3.13
-    print_success "Virtual environment created"
+    # Check if virtual environment already exists
+    if [ -d ".venv" ]; then
+        print_status "Virtual environment already exists"
+        if prompt_yes_no "Do you want to recreate it?"; then
+            rm -rf .venv
+            uv venv --python 3.13
+            print_success "Virtual environment recreated"
+        else
+            print_success "Using existing virtual environment"
+        fi
+    else
+        print_status "Creating Python 3.13 virtual environment..."
+        uv venv --python 3.13
+        print_success "Virtual environment created"
+    fi
     
     # Lock and sync dependencies
     print_status "Installing dependencies..."
@@ -106,10 +356,20 @@ main() {
     uv sync --all-extras
     print_success "Dependencies installed"
     
-    # Create .envrc file
-    print_status "Creating .envrc file..."
-    echo 'source .venv/bin/activate' > .envrc
-    print_success ".envrc file created"
+    # Create/update .envrc file
+    if [ -f ".envrc" ]; then
+        if ! grep -q "source .venv/bin/activate" .envrc; then
+            print_status "Updating .envrc file..."
+            echo 'source .venv/bin/activate' >> .envrc
+            print_success ".envrc file updated"
+        else
+            print_success ".envrc file already configured"
+        fi
+    else
+        print_status "Creating .envrc file..."
+        echo 'source .venv/bin/activate' > .envrc
+        print_success ".envrc file created"
+    fi
     
     # Set up direnv
     print_status "Setting up direnv..."
@@ -123,8 +383,13 @@ main() {
     print_success "Scripts are now executable"
     
     # Create config directory
-    print_status "Creating config directory..."
-    mkdir -p configs
+    if [ ! -d "configs" ]; then
+        print_status "Creating config directory..."
+        mkdir -p configs
+        print_success "Config directory created"
+    else
+        print_success "Config directory already exists"
+    fi
     
     # Create sample config if it doesn't exist
     if [ ! -f "configs/sample.json" ]; then
@@ -134,11 +399,24 @@ main() {
   "auto_restart": true,
   "stagger": 5.0,
   "check_interval": 15,
+  "context_threshold": 20,
+  "idle_timeout": 60,
+  "max_errors": 3,
   "skip_regenerate": false,
   "skip_commit": false
 }
 EOF
         print_success "Sample config created at configs/sample.json"
+    else
+        print_success "Sample config already exists"
+    fi
+    
+    # Configure cc alias
+    echo ""
+    if ! configure_cc_alias; then
+        print_warning "The 'cc' alias was not configured. The agent farm requires this alias to work."
+        print_warning "You can manually add to your shell config:"
+        echo '    alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"'
     fi
     
     # Final instructions

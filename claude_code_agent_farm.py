@@ -4,6 +4,7 @@ Claude Code Agent Farm - Hybrid Orchestrator
 Combines simplicity with robust monitoring and automatic agent management
 """
 
+import contextlib
 import json
 import os
 import re
@@ -11,12 +12,13 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
 from random import randint
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 try:
     import typer
@@ -54,31 +56,57 @@ DEFAULT_PROMPT = textwrap.dedent("""\
 # ─────────────────────────────── Helper Functions ─────────────────────────── #
 
 def run(cmd: str, *, check: bool = True, quiet: bool = False, capture: bool = False) -> Tuple[int, str, str]:
-    """Execute shell command with optional output capture"""
+    """Execute shell command with optional output capture
+
+    When capture=False, output is streamed to terminal unless quiet=True
+    When capture=True, output is captured and returned
+    """
     if not quiet:
         console.log(cmd, style="cyan")
 
     if capture:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        return result.returncode, result.stdout, result.stderr
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=check)
+        return result.returncode, result.stdout or "", result.stderr or ""
     else:
-        result = subprocess.run(cmd, shell=True, check=check)
+        # Stream output to terminal when not capturing
+        stdout_pipe = subprocess.DEVNULL if quiet else None
+        stderr_pipe = subprocess.DEVNULL if quiet else subprocess.STDOUT
+        result = subprocess.run(cmd, shell=True, check=check,
+                              stdout=stdout_pipe, stderr=stderr_pipe, text=True)
         return result.returncode, "", ""
 
 def line_count(file_path: Path) -> int:
     """Count lines in a file"""
     try:
-        with file_path.open("r", errors="ignore") as f:
-            return sum(1 for _ in f)
-    except Exception:
+        # Try UTF-8 first, then fall back to latin-1
+        try:
+            with file_path.open("r", encoding="utf-8") as f:
+                return sum(1 for _ in f)
+        except UnicodeDecodeError:
+            with file_path.open("r", encoding="latin-1") as f:
+                return sum(1 for _ in f)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not count lines in {file_path}: {e}[/yellow]")
         return 0
 
 def tmux_send(target: str, data: str, enter: bool = True) -> None:
-    """Send keystrokes to a tmux pane"""
-    escaped = data.replace("'", r"'\''")
-    run(f"tmux send-keys -t {target} '{escaped}'", quiet=True)
-    if enter:
-        run(f"tmux send-keys -t {target} C-m", quiet=True)
+    """Send keystrokes to a tmux pane (binary-safe)"""
+    max_retries = 3
+    retry_delay = 0.5
+
+    for attempt in range(max_retries):
+        try:
+            # Use tmux's literal mode (-l) to avoid quoting issues
+            if data:
+                run(f"tmux send-keys -l -t {target} {shlex.quote(data)}", quiet=True)
+            if enter:
+                run(f"tmux send-keys -t {target} C-m", quiet=True)
+            break
+        except subprocess.CalledProcessError:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                raise
 
 def tmux_capture(target: str) -> str:
     """Capture content from a tmux pane"""
@@ -90,12 +118,18 @@ def tmux_capture(target: str) -> str:
 class AgentMonitor:
     """Monitors Claude Code agents for health and performance"""
 
-    def __init__(self, session: str, num_agents: int):
+    def __init__(self, session: str, num_agents: int,
+                 context_threshold: int = 20,
+                 idle_timeout: int = 60,
+                 max_errors: int = 3):
         self.session = session
         self.num_agents = num_agents
         self.agents: Dict[int, Dict] = {}
         self.running = True
         self.start_time = datetime.now()
+        self.context_threshold = context_threshold
+        self.idle_timeout = idle_timeout
+        self.max_errors = max_errors
 
         # Initialize agent tracking
         for i in range(num_agents):
@@ -110,12 +144,23 @@ class AgentMonitor:
 
     def detect_context_percentage(self, content: str) -> Optional[int]:
         """Extract context percentage from pane content"""
-        match = re.search(r'Context left until\s*auto-compact:\s*(\d+)%', content)
-        return int(match.group(1)) if match else None
+        # Try multiple patterns for robustness
+        patterns = [
+            r'Context left until\s*auto-compact:\s*(\d+)%',
+            r'Context remaining:\s*(\d+)%',
+            r'(\d+)%\s*context\s*remaining',
+            r'Context:\s*(\d+)%'
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+        return None
 
     def is_claude_ready(self, content: str) -> bool:
         """Check if Claude Code is ready for input"""
-        return '│ >' in content and 'for shortcuts' in content
+        return bool('│ >' in content and 'for shortcuts' in content)
 
     def is_claude_working(self, content: str) -> bool:
         """Check if Claude Code is actively working"""
@@ -124,7 +169,12 @@ class AgentMonitor:
 
     def has_settings_error(self, content: str) -> bool:
         """Check for settings corruption"""
-        error_indicators = ['API key', 'Enter your API key', 'Configuration error', 'Settings corrupted']
+        error_indicators = [
+            'API key', 'Enter your API key', 'Configuration error',
+            'Settings corrupted', 'Invalid API key', 'Authentication failed',
+            'Rate limit exceeded', 'Unauthorized', 'Permission denied',
+            'Failed to load configuration', 'Invalid configuration'
+        ]
         return any(indicator in content for indicator in error_indicators)
 
     def check_agent(self, agent_id: int) -> Dict:
@@ -152,7 +202,7 @@ class AgentMonitor:
         elif self.is_claude_ready(content):
             # Check if idle for too long
             idle_time = (datetime.now() - agent['last_activity']).total_seconds()
-            if idle_time > 60:  # 1 minute idle
+            if idle_time > self.idle_timeout:
                 agent['status'] = 'idle'
             else:
                 agent['status'] = 'ready'
@@ -166,10 +216,11 @@ class AgentMonitor:
         agent = self.agents[agent_id]
 
         # Restart conditions
-        return (
+        return bool(
             agent['status'] == 'error' or
+            agent['errors'] >= self.max_errors or
             agent['status'] == 'idle' or
-            agent['last_context'] <= 20  # Context threshold
+            agent['last_context'] <= self.context_threshold
         )
 
     def get_status_table(self) -> Table:
@@ -223,7 +274,12 @@ class ClaudeAgentFarm:
                  no_monitor: bool = False,
                  attach: bool = False,
                  prompt_file: Optional[str] = None,
-                 config: Optional[str] = None):
+                 config: Optional[str] = None,
+                 context_threshold: int = 20,
+                 idle_timeout: int = 60,
+                 max_errors: int = 3,
+                 tmux_kill_on_exit: bool = True,
+                 tmux_mouse: bool = True):
 
         # Store all parameters
         self.path = path
@@ -239,23 +295,37 @@ class ClaudeAgentFarm:
         self.attach = attach
         self.prompt_file = prompt_file
         self.config = config
+        self.context_threshold = context_threshold
+        self.idle_timeout = idle_timeout
+        self.max_errors = max_errors
+        self.tmux_kill_on_exit = tmux_kill_on_exit
+        self.tmux_mouse = tmux_mouse
 
         # Apply config file if provided
         if config:
             self._load_config(config)
 
+        # Validate agent count
+        if self.agents > getattr(self, 'max_agents', 50):
+            raise ValueError(f"Agent count {self.agents} exceeds maximum {getattr(self, 'max_agents', 50)}")
+
         # Initialize other attributes
         self.project_path = Path(self.path).expanduser().resolve()
         self.combined_file = self.project_path / "combined_typechecker_and_linter_problems.txt"
         self.prompt_text = self._load_prompt()
-        self.monitor = None
+        self.monitor: Optional[AgentMonitor] = None
         self.running = True
+
+        # Git settings from config
+        self.git_branch: Optional[str] = getattr(self, 'git_branch', None)
+        self.git_remote: str = getattr(self, 'git_remote', 'origin')
+        self._cleanup_registered = False
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _load_config(self, config_path: str):
+    def _load_config(self, config_path: str) -> None:
         """Load settings from JSON config file"""
         config_file = Path(config_path)
         if config_file.exists():
@@ -266,7 +336,7 @@ class ClaudeAgentFarm:
                     if hasattr(self, key):
                         setattr(self, key, value)
 
-    def _signal_handler(self, sig, frame):
+    def _signal_handler(self, sig: Any, frame: Any) -> None:
         """Handle shutdown signals gracefully"""
         console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...[/yellow]")
         self.running = False
@@ -274,16 +344,24 @@ class ClaudeAgentFarm:
     def _load_prompt(self) -> str:
         """Load prompt from file or use default"""
         if self.prompt_file:
-            return Path(self.prompt_file).read_text().strip()
+            prompt_path = Path(self.prompt_file)
+            if not prompt_path.exists():
+                console.print(f"[red]Error: Prompt file not found: {self.prompt_file}[/red]")
+                console.print("[yellow]Using default prompt instead[/yellow]")
+                return DEFAULT_PROMPT.strip()
+            prompt_text = prompt_path.read_text().strip()
+            if not prompt_text:
+                raise ValueError(f"Prompt file is empty: {self.prompt_file}")
+            return prompt_text
         return DEFAULT_PROMPT.strip()
 
-    def regenerate_problems(self):
+    def regenerate_problems(self) -> None:
         """Regenerate the type-checker and linter problems file"""
         if self.skip_regenerate:
             console.print("[yellow]Skipping problem file regeneration[/yellow]")
             return
 
-        console.rule("[yellow]Regenerating type-checker + linter output")
+        console.rule("[yellow]Regenerating type-check and lint output")
 
         with Progress(
             SpinnerColumn(),
@@ -293,38 +371,77 @@ class ClaudeAgentFarm:
             task = progress.add_task("Running type-check and lint...", total=None)
 
             os.chdir(self.project_path)
-            tmpfile = self.combined_file.with_suffix(".tmp")
 
-            with tmpfile.open("w") as out:
-                out.write("$ bun run type-check\n")
-                subprocess.run("bun run type-check", shell=True, stdout=out, stderr=subprocess.STDOUT)
-                out.write("\n\n$ bun run lint\n")
-                subprocess.run("bun run lint", shell=True, stdout=out, stderr=subprocess.STDOUT)
+            # Use a proper temporary file to avoid conflicts
+            with tempfile.NamedTemporaryFile(mode='w', dir=self.project_path,
+                                            prefix='combined_', suffix='.tmp',
+                                            delete=False) as tmpfile:
+                tmpfile.write("$ bun run type-check\n")
+                tmpfile.flush()
 
-            tmpfile.replace(self.combined_file)
+                # Run type-check
+                subprocess.run("bun run type-check", shell=True,
+                               stdout=tmpfile, stderr=subprocess.STDOUT)
+
+                tmpfile.write("\n\n$ bun run lint\n")
+                tmpfile.flush()
+
+                # Run lint
+                subprocess.run("bun run lint", shell=True,
+                               stdout=tmpfile, stderr=subprocess.STDOUT)
+
+                tmpfile_path = Path(tmpfile.name)
+
+            # Atomic rename (handle cross-filesystem moves)
+            try:
+                tmpfile_path.replace(self.combined_file)
+            except OSError:
+                # Fallback for cross-filesystem scenarios
+                import shutil
+                shutil.move(str(tmpfile_path), str(self.combined_file))
+            finally:
+                # Clean up temp file if it still exists
+                tmpfile_path.unlink(missing_ok=True)
+
             progress.update(task, completed=True)
 
         count = line_count(self.combined_file)
         console.print(f"[green]✓ Generated {count} lines of problems[/green]")
 
-    def commit_and_push(self):
+    def commit_and_push(self) -> None:
         """Commit and push the updated problem count"""
         if self.skip_commit:
             console.print("[yellow]Skipping git commit/push[/yellow]")
             return
 
         console.rule("[yellow]Committing updated problem count")
+
+        # Verify we're in a git repository
+        ret, _, _ = run("git rev-parse --is-inside-work-tree", capture=True, quiet=True, check=False)
+        if ret != 0:
+            console.print("[red]Error: Not in a git repository[/red]")
+            console.print("[yellow]Skipping git operations[/yellow]")
+            return
+
         count = line_count(self.combined_file)
 
         try:
             run(f"git add {shlex.quote(str(self.combined_file))}")
             run(f"git commit -m 'Before next round of fixes; currently {count} lines of problems'", check=False)
-            run("git push", check=False)
+
+            # Determine branch and remote
+            branch = self.git_branch
+            if not branch:
+                _, stdout, _ = run("git rev-parse --abbrev-ref HEAD", capture=True, quiet=True)
+                branch = stdout.strip() or "HEAD"
+
+            remote = self.git_remote
+            run(f"git push {remote} {branch}", check=False)
             console.print(f"[green]✓ Pushed commit with {count} current problems[/green]")
         except subprocess.CalledProcessError:
             console.print("[yellow]⚠ git commit/push skipped (no changes?)")
 
-    def setup_tmux_session(self):
+    def setup_tmux_session(self) -> None:
         """Create tmux session with tiled agent panes"""
         console.rule(f"[yellow]Creating tmux session '{self.session}' with {self.agents} agents")
 
@@ -342,17 +459,33 @@ class ClaudeAgentFarm:
                 run(f"tmux split-window -t {self.session}:agents", quiet=True)
                 run(f"tmux select-layout -t {self.session}:agents tiled", quiet=True)
 
+        # Enable mouse support if configured
+        if self.tmux_mouse:
+            run(f"tmux set-option -t {self.session} -g mouse on", quiet=True)
+
+        # Register cleanup handler
+        if not self._cleanup_registered:
+            import atexit
+            atexit.register(self._emergency_cleanup)
+            self._cleanup_registered = True
+
         console.print(f"[green]✓ Created session with {self.agents} panes[/green]")
 
-    def start_agent(self, agent_id: int, restart: bool = False):
+    def start_agent(self, agent_id: int, restart: bool = False) -> None:
         """Start or restart a single agent"""
         pane_target = f"{self.session}:agents.{agent_id}"
 
         if restart:
             # Exit current session
             tmux_send(pane_target, "/exit")
-            time.sleep(1)
-            self.monitor.agents[agent_id]['cycles'] += 1
+            # Wait for shell prompt to appear (max 5 seconds)
+            for _ in range(5):
+                time.sleep(1)
+                content = tmux_capture(pane_target)
+                if "$" in content or "%" in content or ">" in content:
+                    break
+            if self.monitor:
+                self.monitor.agents[agent_id]['cycles'] += 1
 
         # Navigate and start Claude Code
         tmux_send(pane_target, f"cd {self.project_path}")
@@ -365,9 +498,13 @@ class ClaudeAgentFarm:
 
         # Send prompt with unique seed for randomization
         seed = randint(100000, 999999)
-        salted_prompt = self.prompt_text.replace(
-            "random chunks",
-            f"random chunks (instance-seed {seed})"
+        # Use regex to handle variations like "random chunks of 50 lines"
+        salted_prompt = re.sub(
+            r"random chunks(\b.*?\b)?",
+            lambda m: f"{m.group(0)} (instance-seed {seed})",
+            self.prompt_text,
+            count=1,
+            flags=re.IGNORECASE
         )
 
         # Send prompt line by line
@@ -378,10 +515,11 @@ class ClaudeAgentFarm:
         if not restart:
             console.print(f"[green]✓ Agent {agent_id:02d}: prompt injected[/green]")
 
-        self.monitor.agents[agent_id]['status'] = 'starting'
-        self.monitor.agents[agent_id]['last_activity'] = datetime.now()
+        if self.monitor:
+            self.monitor.agents[agent_id]['status'] = 'starting'
+            self.monitor.agents[agent_id]['last_activity'] = datetime.now()
 
-    def launch_agents(self):
+    def launch_agents(self) -> None:
         """Launch all agents with staggered start times"""
         console.rule("[yellow]Launching agents")
 
@@ -395,7 +533,7 @@ class ClaudeAgentFarm:
             if i < self.agents - 1:
                 time.sleep(self.stagger)
 
-    def monitor_loop(self):
+    def monitor_loop(self) -> None:
         """Main monitoring loop with auto-restart capability"""
         if self.no_monitor:
             console.print("[yellow]Monitoring disabled. Agents will run without supervision.[/yellow]")
@@ -405,25 +543,26 @@ class ClaudeAgentFarm:
         console.rule("[green]All agents launched - Monitoring active")
         console.print("[dim]Press Ctrl+C for graceful shutdown[/dim]\n")
 
-        with Live(self.monitor.get_status_table(), refresh_per_second=1) as live:
-            check_counter = 0
+        if self.monitor:
+            with Live(self.monitor.get_status_table(), refresh_per_second=1) as live:
+                check_counter = 0
 
-            while self.running:
-                # Check agents every N seconds
-                if check_counter % self.check_interval == 0:
-                    for agent_id in range(self.agents):
-                        self.monitor.check_agent(agent_id)
+                while self.running:
+                    # Check agents every N seconds
+                    if check_counter % self.check_interval == 0:
+                        for agent_id in range(self.agents):
+                            self.monitor.check_agent(agent_id)
 
-                        # Auto-restart if needed
-                        if self.auto_restart and self.monitor.needs_restart(agent_id):
-                            console.print(f"\n[yellow]Restarting agent {agent_id}...[/yellow]")
-                            self.start_agent(agent_id, restart=True)
+                            # Auto-restart if needed
+                            if self.auto_restart and self.monitor.needs_restart(agent_id):
+                                console.print(f"\n[yellow]Restarting agent {agent_id}...[/yellow]")
+                                self.start_agent(agent_id, restart=True)
 
-                live.update(self.monitor.get_status_table())
-                time.sleep(1)
-                check_counter += 1
+                    live.update(self.monitor.get_status_table())
+                    time.sleep(1)
+                    check_counter += 1
 
-    def run(self):
+    def run(self) -> None:
         """Main orchestration flow"""
         os.chdir(self.project_path)
 
@@ -443,7 +582,11 @@ class ClaudeAgentFarm:
         self.setup_tmux_session()
 
         # Initialize monitor
-        self.monitor = AgentMonitor(self.session, self.agents)
+        self.monitor = AgentMonitor(
+            self.session, self.agents,
+            context_threshold=self.context_threshold,
+            idle_timeout=self.idle_timeout,
+            max_errors=self.max_errors)
 
         # Launch agents
         self.launch_agents()
@@ -455,11 +598,8 @@ class ClaudeAgentFarm:
         if self.attach and not self.no_monitor:
             run(f"tmux attach-session -t {self.session}", check=False)
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Clean shutdown of all agents"""
-        if not self.monitor:
-            return
-
         console.print("\n[yellow]Shutting down agents...[/yellow]")
 
         for i in range(self.agents):
@@ -467,8 +607,18 @@ class ClaudeAgentFarm:
             tmux_send(pane_target, "/exit")
 
         time.sleep(2)
-        run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
-        console.print("[green]✓ Shutdown complete[/green]")
+
+        if getattr(self, "tmux_kill_on_exit", True):
+            run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
+            console.print("[green]✓ tmux session terminated[/green]")
+        else:
+            console.print("[yellow]tmux left running (tmux_kill_on_exit = false)[/yellow]")
+
+    def _emergency_cleanup(self) -> None:
+        """Emergency cleanup handler for unexpected exits"""
+        with contextlib.suppress(Exception):
+            # Kill the tmux session if it exists
+            run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
 
 # ─────────────────────────────── CLI Entry Point ──────────────────────────── #
 
@@ -551,8 +701,38 @@ def main(
         "--config",
         help="Load settings from JSON config file",
         rich_help_panel="Advanced Options"
+    ),
+    context_threshold: int = typer.Option(
+        20,
+        "--context-threshold",
+        help="Restart agent when context ≤ this percentage",
+        rich_help_panel="Advanced Options"
+    ),
+    idle_timeout: int = typer.Option(
+        60,
+        "--idle-timeout",
+        help="Seconds of inactivity before marking agent as idle",
+        rich_help_panel="Advanced Options"
+    ),
+    max_errors: int = typer.Option(
+        3,
+        "--max-errors",
+        help="Maximum consecutive errors before disabling agent",
+        rich_help_panel="Advanced Options"
+    ),
+    tmux_kill_on_exit: bool = typer.Option(
+        True,
+        "--tmux-kill-on-exit/--no-tmux-kill-on-exit",
+        help="Kill tmux session on exit",
+        rich_help_panel="Advanced Options"
+    ),
+    tmux_mouse: bool = typer.Option(
+        True,
+        "--tmux-mouse/--no-tmux-mouse",
+        help="Enable tmux mouse support",
+        rich_help_panel="Advanced Options"
     )
-):
+) -> None:
     """
     Claude Code Agent Farm - Parallel code fixing automation
 
@@ -565,6 +745,16 @@ def main(
     if not project_path.is_dir():
         console.print(f"[red]✖ {project_path} is not a directory[/red]")
         raise typer.Exit(1)
+
+    # Validate agent count
+    if agents < 1:
+        console.print("[red]✖ Number of agents must be at least 1[/red]")
+        raise typer.Exit(1)
+
+    if agents > 50:
+        console.print(f"[yellow]⚠ Running {agents} agents may consume significant resources[/yellow]")
+        if not typer.confirm("Do you want to continue?"):
+            raise typer.Exit(0)
 
     # Create and run the orchestrator
     farm = ClaudeAgentFarm(
@@ -580,7 +770,12 @@ def main(
         no_monitor=no_monitor,
         attach=attach,
         prompt_file=prompt_file,
-        config=config
+        config=config,
+        context_threshold=context_threshold,
+        idle_timeout=idle_timeout,
+        max_errors=max_errors,
+        tmux_kill_on_exit=tmux_kill_on_exit,
+        tmux_mouse=tmux_mouse
     )
 
     try:
