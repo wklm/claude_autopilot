@@ -364,7 +364,10 @@ class AgentMonitor:
 
     def get_status_table(self) -> Table:
         """Generate status table for all agents"""
-        table = Table(title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}")
+        table = Table(
+            title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}",
+            box=box.ROUNDED,  # Use rounded corners for status tables
+        )
 
         table.add_column("Agent", style="cyan", width=8)
         table.add_column("Status", style="green", width=10)
@@ -1379,7 +1382,8 @@ class ClaudeAgentFarm:
         # Send prompt as a single message
         # CRITICAL: Use tmux's literal mode to send the entire prompt correctly
         # This avoids complex line-by-line sending that can cause issues
-        console.print(f"[dim]Agent {agent_id:02d}: Sending {len(salted_prompt)} char prompt...[/dim]")
+        prompt_preview = textwrap.shorten(salted_prompt.replace('\n', ' '), width=50, placeholder="...")
+        console.print(f"[dim]Agent {agent_id:02d}: Sending {len(salted_prompt)} chars: {prompt_preview}[/dim]")
         
         # Send the entire prompt at once using literal mode
         tmux_send(pane_target, salted_prompt, enter=True)
@@ -1502,15 +1506,19 @@ class ClaudeAgentFarm:
         """Main orchestration flow"""
         os.chdir(self.project_path)
 
-        # Display startup banner
+        # Display startup banner with custom box style
+        # Wrap long project paths for better display
+        wrapped_path = textwrap.fill(str(self.project_path), width=60, subsequent_indent="         ")
+        
         console.print(
             Panel.fit(
                 f"[bold cyan]Claude Code Agent Farm[/bold cyan]\n"
-                f"Project: {self.project_path}\n"
+                f"Project: {wrapped_path}\n"
                 f"Agents: {self.agents}\n"
                 f"Session: {self.session}\n"
                 f"Auto-restart: {'enabled' if self.auto_restart else 'disabled'}",
                 border_style="cyan",
+                box=box.DOUBLE,  # Use double-line box for main banner
             )
         )
 
@@ -1764,7 +1772,9 @@ def main(
     except KeyboardInterrupt:
         console.print("\n[red]Interrupted by user[/red]")
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        # Wrap long error messages for better readability
+        error_msg = textwrap.fill(str(e), width=80, initial_indent="Error: ", subsequent_indent="       ")
+        console.print(f"[red]{error_msg}[/red]")
         import traceback
 
         traceback.print_exc()
@@ -1785,6 +1795,7 @@ def monitor_only(
         Panel.fit(
             f"[bold cyan]Claude Agent Farm Monitor[/bold cyan]\nSession: {session}\nPress Ctrl+C to exit monitor view",
             border_style="cyan",
+            box=box.DOUBLE_EDGE,  # Use double-edge box for monitor panel
         )
     )
 
@@ -1805,7 +1816,10 @@ def monitor_only(
                         raise Exception(f"Failed to read state file: {e}") from e
 
                     # Recreate table from state data
-                    table = Table(title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}")
+                    table = Table(
+                        title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}",
+                        box=box.ROUNDED,  # Consistent box style with main status table
+                    )
                     table.add_column("Agent", style="cyan", width=8)
                     table.add_column("Status", style="green", width=10)
                     table.add_column("Cycles", style="yellow", width=6)
@@ -1847,7 +1861,9 @@ def monitor_only(
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                live.update(f"[red]Error reading state: {e}[/red]")
+                # Wrap error messages for monitor display
+                wrapped_error = textwrap.fill(f"Error reading state: {e}", width=60)
+                live.update(f"[red]{wrapped_error}[/red]")
                 time.sleep(1)
 
 
