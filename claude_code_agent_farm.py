@@ -21,45 +21,41 @@ from pathlib import Path
 from random import randint
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-try:
-    import typer
-    from rich.console import Console
-    from rich.live import Live
-    from rich.panel import Panel
-    from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
-    from rich.table import Table
-except ImportError:
-    print("Please install required libraries: pip install typer rich")
-    sys.exit(1)
+import typer
+from rich import box
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+)
+from rich.prompt import Confirm
+from rich.table import Table
 
-app = typer.Typer(help="Claude Code Agent Farm - Parallel code fixing automation", rich_markup_mode="rich")
-console = Console()
+app = typer.Typer(
+    rich_markup_mode="rich",
+    help="Orchestrate multiple Claude Code agents for parallel work using tmux",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+console = Console(stderr=True)  # Use stderr for progress/info so stdout remains clean
 
 # ─────────────────────────────── Configuration ────────────────────────────── #
 
 
 def interruptible_confirm(message: str, default: bool = False) -> bool:
-    """A confirm prompt that can be interrupted by Ctrl+C"""
+    """Confirmation prompt that returns default on KeyboardInterrupt"""
     try:
-        return typer.confirm(message, default=default)
-    except (KeyboardInterrupt, EOFError) as e:
-        console.print("\n[yellow]Confirmation interrupted[/yellow]")
-        raise KeyboardInterrupt() from e
+        return Confirm.ask(message, default=default)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted - using default response[/yellow]")
+        return default
 
 
-DEFAULT_PROMPT = textwrap.dedent("""\
-    I need you to start going through combined_typechecker_and_linter_problems.txt (just pick random chunks of 50 lines at a time from anywhere within the file, starting with a random starting line; since I have multiple agents working on this task, I want each agent to work on different problems!)
 
-    As you select your chosen problems, mark them as such by prepending the line with [COMPLETED] so we can keep track of which ones have already been processed-- do this up front so there's no risk of forgetting to do it later and wasting time and compute on errors that are already being worked on or which were previously worked on. (Obviously, when selecting your random lines to work on, you should first filter out any rows that have "[COMPLETED]" in them so you don't accidentally work on already in-progress or completed tasks!)
-
-    I want you to be SMART about fixing the problems. For example, if it's a type related problem, never try to use a stupid "band aid" fix and set the type to be Unknown or something dumb like that. If there's an unused variable or import, instead of just deleting it, figure out what we originally intended and whether that import or variable could be usefully and productively employed in the code to improve it so that it's no longer unused or unreferenced.
-
-    Make all edits to the existing code files-- don't ever create a duplicative code file with the changes and give it some silly name; for instance, don't correct a problem in ComponentXYZ.tsx in a newly created file called ComponentXYZFixed.tsx or ComponentXYZNew.tsx-- always just revise ComponentXYZ.tsx in place!
-
-    CRITICALLY IMPORTANT: You must adhere to ALL guidelines and advice in the NEXTJS15_BEST_PRACTICES.md document. I want to avoid technical debt and endless compatibility shims and workarounds and just fix things once and for all the RIGHT WAY. This code is still in development so we don't care at all about backwards compatibility. Note that we only use bun in this project, never npm. And you MUST check each proposed change against the @NEXT_BEST_PRACTICES_IMPLEMENTATION_PROGRESS.md guide!
-
-    When you're done fixing the entire batch of selected problems, you can commit your progress to git with a detailed commit message (but don't go overboard making the commit message super long). Try to complete as much work as possible before coming back to me for more instructions-- what I've already asked you to do should keep you very busy for a while!
-""")
 
 # ─────────────────────────────── Constants ────────────────────────────────── #
 
@@ -688,19 +684,62 @@ class ClaudeAgentFarm:
             console.print(f"[red]Error restoring Claude settings: {e}[/red]")
             return False
 
+    def _copy_best_practices_guides(self) -> None:
+        """Copy best practices guides to the project folder if configured"""
+        best_practices_dir = getattr(self, 'best_practices_dir', None)
+        if not best_practices_dir:
+            return
+            
+        source_dir = Path(best_practices_dir)
+        if not source_dir.exists():
+            console.print(f"[yellow]Best practices directory not found: {source_dir}[/yellow]")
+            return
+            
+        # Copy to project's best_practices_guides folder
+        dest_dir = self.project_path / "best_practices_guides"
+        dest_dir.mkdir(exist_ok=True)
+        
+        # Copy all markdown files
+        copied_files = []
+        for md_file in source_dir.glob("*.md"):
+            dest_file = dest_dir / md_file.name
+            try:
+                import shutil
+                shutil.copy2(md_file, dest_file)
+                copied_files.append(md_file.name)
+            except Exception as e:
+                console.print(f"[yellow]Failed to copy {md_file.name}: {e}[/yellow]")
+        
+        if copied_files:
+            console.print(f"[green]✓ Copied {len(copied_files)} best practices guide(s) to project[/green]")
+            for filename in copied_files:
+                console.print(f"  - {filename}")
+
     def _load_prompt(self) -> str:
         """Load prompt from file or use default"""
         if self.prompt_file:
             prompt_path = Path(self.prompt_file)
             if not prompt_path.exists():
                 console.print(f"[red]Error: Prompt file not found: {self.prompt_file}[/red]")
-                console.print("[yellow]Using default prompt instead[/yellow]")
-                return DEFAULT_PROMPT.strip()
+                raise ValueError(f"Prompt file not found: {self.prompt_file}")
             prompt_text = prompt_path.read_text().strip()
             if not prompt_text:
                 raise ValueError(f"Prompt file is empty: {self.prompt_file}")
             return prompt_text
-        return DEFAULT_PROMPT.strip()
+        
+        # Try to find a default prompt file
+        default_prompts = [
+            self.project_path / "prompts" / f"default_prompt_{getattr(self, 'tech_stack', 'nextjs')}.txt",
+            self.project_path / "prompts" / "default_prompt.txt",
+            Path(__file__).parent / "prompts" / f"default_prompt_{getattr(self, 'tech_stack', 'nextjs')}.txt",
+            Path(__file__).parent / "prompts" / "default_prompt.txt",
+        ]
+        
+        for prompt_path in default_prompts:
+            if prompt_path.exists():
+                return prompt_path.read_text().strip()
+        
+        raise ValueError("No prompt file specified and no default prompt found. Use --prompt-file to specify a prompt.")
 
     def regenerate_problems(self) -> None:
         """Regenerate the type-checker and linter problems file"""
@@ -710,6 +749,24 @@ class ClaudeAgentFarm:
 
         console.rule("[yellow]Regenerating type-check and lint output")
 
+        # Get commands from config or use defaults based on tech stack
+        tech_stack = getattr(self, 'tech_stack', 'nextjs')
+        
+        # Default commands for different tech stacks
+        default_commands = {
+            'nextjs': {
+                'type_check': ["bun", "run", "type-check"],
+                'lint': ["bun", "run", "lint"]
+            },
+            'python': {
+                'type_check': ["mypy", "."],
+                'lint': ["ruff", "check", "."]
+            }
+        }
+        
+        # Use configured commands or fall back to defaults
+        commands = getattr(self, 'problem_commands', default_commands.get(tech_stack, default_commands['nextjs']))
+        
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -725,29 +782,35 @@ class ClaudeAgentFarm:
             ) as tmpfile:
                 tmpfile_path = Path(tmpfile.name)
 
-                tmpfile.write("$ bun run type-check\n")
-                tmpfile.flush()
-
-                # Check if we should continue
-                if not self.running:
-                    tmpfile_path.unlink(missing_ok=True)
-                    raise KeyboardInterrupt()
-
                 # Run type-check
-                subprocess.run(
-                    ["bun", "run", "type-check"], stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path
-                )
+                type_check_cmd = commands.get('type_check')
+                if type_check_cmd:
+                    tmpfile.write(f"$ {' '.join(type_check_cmd)}\n")
+                    tmpfile.flush()
 
-                tmpfile.write("\n\n$ bun run lint\n")
-                tmpfile.flush()
+                    # Check if we should continue
+                    if not self.running:
+                        tmpfile_path.unlink(missing_ok=True)
+                        raise KeyboardInterrupt()
 
-                # Check again before lint
-                if not self.running:
-                    tmpfile_path.unlink(missing_ok=True)
-                    raise KeyboardInterrupt()
+                    subprocess.run(
+                        type_check_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path
+                    )
 
                 # Run lint
-                subprocess.run(["bun", "run", "lint"], stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)
+                lint_cmd = commands.get('lint')
+                if lint_cmd:
+                    if type_check_cmd:  # Add spacing if we ran type-check
+                        tmpfile.write("\n\n")
+                    tmpfile.write(f"$ {' '.join(lint_cmd)}\n")
+                    tmpfile.flush()
+
+                    # Check again before lint
+                    if not self.running:
+                        tmpfile_path.unlink(missing_ok=True)
+                        raise KeyboardInterrupt()
+
+                    subprocess.run(lint_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)
 
             # Atomic rename (handle cross-filesystem moves)
             try:
@@ -1456,6 +1519,9 @@ class ClaudeAgentFarm:
         
         # Check current permissions are correct
         self._check_claude_permissions()
+        
+        # Copy best practices guides if configured
+        self._copy_best_practices_guides()
 
         try:
             # Execute workflow steps

@@ -1,0 +1,24 @@
+{
+  "tech_stack": "python",
+  "problem_commands": {
+    "type_check": ["uv", "run", "mypy", "src", "--strict"],
+    "lint": ["uv", "run", "ruff", "check", "src", "tests", "--fix"]
+  },
+  "best_practices_dir": "./best_practices_guides",
+  "git_branch": "main",
+  "git_remote": "origin",
+  "max_agents": 30,
+  "agents": 15,
+  "stagger": 12.0,
+  "wait_after_cc": 20.0,
+  "check_interval": 15,
+  "context_threshold": 25,
+  "idle_timeout": 90,
+  "max_errors": 5,
+  "auto_restart": true,
+  "skip_regenerate": false,
+  "skip_commit": false,
+  "tmux_kill_on_exit": true,
+  "tmux_mouse": true,
+  "fast_start": false
+} 

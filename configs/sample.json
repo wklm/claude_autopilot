@@ -1,8 +1,8 @@
 {
     "comment": "This is a sample configuration. The 'path' parameter is still required via CLI.",
-    "agents": 20,
+    "agents": 8,
     "session": "claude_agents",
-    "stagger": 8.0,
+    "stagger": 6.0,
     "wait_after_cc": 8.0,
     "check_interval": 10,
     "skip_regenerate": false,
