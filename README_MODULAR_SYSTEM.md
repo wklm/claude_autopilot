@@ -35,36 +35,51 @@ python claude_code_agent_farm.py --path /path/to/project --config configs/python
 
 #### Best Practices Guides
 
-The system can automatically copy best practices guides to your project:
+The system can automatically copy specific best practices guide files to your project:
 
 ```json
 {
-  "best_practices_dir": "./best_practices_guides"
+  "best_practices_files": [
+    "./best_practices_guides/NEXTJS15_BEST_PRACTICES.md",
+    "./best_practices_guides/TYPESCRIPT_BEST_PRACTICES.md"
+  ]
 }
 ```
 
-Place your markdown guides in the specified directory, and they'll be copied to `{project}/best_practices_guides/` when the farm starts.
+Specify individual file paths, and they'll be copied to `{project}/best_practices_guides/` when the farm starts.
 
 #### Full Configuration Example
 
 ```json
 {
+  "comment": "Configuration for Python project with uv",
   "tech_stack": "python",
   "problem_commands": {
     "type_check": ["uv", "run", "mypy", "src", "--strict"],
     "lint": ["uv", "run", "ruff", "check", "src", "tests"]
   },
-  "best_practices_dir": "./best_practices_guides",
-  "git_branch": "main",
-  "git_remote": "origin",
+  "best_practices_files": ["./best_practices_guides/PYTHON_BEST_PRACTICES.md"],
   "agents": 20,
+  "session": "claude_agents",
   "stagger": 10.0,
   "wait_after_cc": 15.0,
   "check_interval": 10,
+  "skip_regenerate": false,
+  "skip_commit": false,
+  "auto_restart": true,
+  "no_monitor": false,
+  "attach": false,
+  "prompt_file": "prompts/default_prompt_python.txt",
   "context_threshold": 20,
   "idle_timeout": 60,
   "max_errors": 3,
-  "auto_restart": true
+  "git_branch": "main",
+  "git_remote": "origin",
+  "tmux_kill_on_exit": true,
+  "tmux_mouse": true,
+  "fast_start": false,
+  "full_backup": false,
+  "max_agents": 50
 }
 ```
 
@@ -120,7 +135,9 @@ Create your own configuration for any tech stack:
   "problem_commands": {
     "type_check": ["cargo", "check"],
     "lint": ["cargo", "clippy", "--", "-D", "warnings"]
-  }
+  },
+  "best_practices_files": ["./best_practices_guides/RUST_BEST_PRACTICES.md"],
+  "prompt_file": "prompts/default_prompt_rust.txt"
 }
 ```
 

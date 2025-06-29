@@ -689,29 +689,33 @@ class ClaudeAgentFarm:
 
     def _copy_best_practices_guides(self) -> None:
         """Copy best practices guides to the project folder if configured"""
-        best_practices_dir = getattr(self, 'best_practices_dir', None)
-        if not best_practices_dir:
+        best_practices_files = getattr(self, 'best_practices_files', [])
+        if not best_practices_files:
             return
             
-        source_dir = Path(best_practices_dir)
-        if not source_dir.exists():
-            console.print(f"[yellow]Best practices directory not found: {source_dir}[/yellow]")
-            return
+        # Ensure it's a list
+        if isinstance(best_practices_files, str):
+            best_practices_files = [best_practices_files]
             
         # Copy to project's best_practices_guides folder
         dest_dir = self.project_path / "best_practices_guides"
         dest_dir.mkdir(exist_ok=True)
         
-        # Copy all markdown files
+        # Copy specified files
         copied_files = []
-        for md_file in source_dir.glob("*.md"):
-            dest_file = dest_dir / md_file.name
+        for file_path in best_practices_files:
+            source_file = Path(file_path).expanduser().resolve()
+            if not source_file.exists():
+                console.print(f"[yellow]Best practices file not found: {source_file}[/yellow]")
+                continue
+                
+            dest_file = dest_dir / source_file.name
             try:
                 import shutil
-                shutil.copy2(md_file, dest_file)
-                copied_files.append(md_file.name)
+                shutil.copy2(source_file, dest_file)
+                copied_files.append(source_file.name)
             except Exception as e:
-                console.print(f"[yellow]Failed to copy {md_file.name}: {e}[/yellow]")
+                console.print(f"[yellow]Failed to copy {source_file.name}: {e}[/yellow]")
         
         if copied_files:
             console.print(f"[green]✓ Copied {len(copied_files)} best practices guide(s) to project[/green]")
