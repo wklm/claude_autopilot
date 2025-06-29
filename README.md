@@ -1,6 +1,6 @@
 # Claude Code Agent Farm 🤖🚜
 
-> Orchestrate multiple Claude Code agents working in parallel to fix TypeScript and linting errors in your codebase
+> Orchestrate multiple Claude Code agents working in parallel to improve your codebase through automated bug fixing or systematic best practices implementation
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -8,17 +8,18 @@
 
 ## 🎯 What is this?
 
-Claude Code Agent Farm is a powerful orchestration tool that runs multiple Claude Code (`cc`) sessions in parallel to automatically fix TypeScript type-checking and linting errors in your codebase. It's like having a team of AI developers working simultaneously on different parts of your error list.
+Claude Code Agent Farm is a powerful orchestration framework that runs multiple Claude Code (`cc`) sessions in parallel to systematically improve your codebase. It supports multiple technology stacks and workflow types, allowing teams of AI agents to work together on large-scale code improvements.
 
 ### Key Features
 
 - 🚀 **Parallel Processing**: Run 20+ Claude Code agents simultaneously
-- 📊 **Smart Monitoring**: Real-time dashboard showing agent status, context usage, and progress
-- 🔄 **Auto-Recovery**: Automatically restarts agents when they complete work or encounter errors
-- 🎯 **Conflict Prevention**: Agents mark completed tasks to avoid duplicate work
-- 🛡️ **Robust Error Handling**: Detects and handles Claude Code settings corruption
-- 📈 **Progress Tracking**: Automatic git commits to track error reduction over time
-- 🖥️ **Flexible Viewing**: Multiple tmux viewing modes to monitor your agent army
+- 🎯 **Multiple Workflows**: Bug fixing or best practices implementation
+- 🌐 **Multi-Stack Support**: Next.js, Python, Rust, or any custom stack
+- 📊 **Smart Monitoring**: Real-time dashboard showing agent status and progress
+- 🔄 **Auto-Recovery**: Automatically restarts agents when needed
+- 📈 **Progress Tracking**: Git commits and structured progress documents
+- ⚙️ **Highly Configurable**: JSON configs with variable substitution
+- 🖥️ **Flexible Viewing**: Multiple tmux viewing modes
 
 ## 📋 Prerequisites
 
@@ -26,8 +27,8 @@ Claude Code Agent Farm is a powerful orchestration tool that runs multiple Claud
 - **tmux** (for terminal multiplexing)
 - **Claude Code** (`claude` command installed and configured)
 - **git** (for version control)
-- **bun** (for your TypeScript project)
-- **direnv** (optional but recommended for auto-environment activation)
+- **Your project's tools** (e.g., `bun` for Next.js, `mypy`/`ruff` for Python)
+- **direnv** (optional but recommended)
 - **uv** (modern Python package manager)
 
 ### Important: The `cc` Alias
@@ -38,148 +39,184 @@ The agent farm requires a special `cc` alias to launch Claude Code with the nece
 alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"
 ```
 
-This alias:
-- Enables background tasks for Claude Code agents
-- Skips permission prompts that would block automation
-- **Will be configured automatically by the setup script**
+This alias will be configured automatically by the setup script.
 
 ## 🚀 Quick Start
 
-### 1. Clone the Repository
+### 1. Clone and Setup
 
 ```bash
 git clone https://github.com/Dicklesworthstone/claude_code_agent_farm.git
 cd claude_code_agent_farm
-```
-
-### 2. Run Automated Setup
-
-```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-This will:
-- Check for required tools
-- Create a Python 3.13 virtual environment
-- Install all dependencies
-- Set up direnv for auto-activation
-- Configure the `cc` alias (with your confirmation)
-- Create sample configuration files
-- Make scripts executable
+### 2. Choose Your Workflow
 
-### 3. Manual Setup (Alternative)
-
-If you prefer to set up manually:
-
+#### For Bug Fixing (Traditional)
 ```bash
-# Create virtual environment
-uv venv --python 3.13
+# Next.js project
+claude-code-agent-farm --path /path/to/project --config configs/nextjs_config.json
 
-# Install dependencies
-uv lock --upgrade
-uv sync --all-extras
-
-# Create .envrc for direnv
-echo 'source .venv/bin/activate' > .envrc
-direnv allow
-
-# Configure the cc alias
-alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"
-# Add to your shell rc file (~/.bashrc or ~/.zshrc):
-echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> ~/.bashrc
-
-# Make scripts executable
-chmod +x view_agents.sh
+# Python project
+claude-code-agent-farm --path /path/to/project --config configs/python_config.json
 ```
 
-## 📖 Understanding the Architecture
-
-### The Two-Script System
-
-This project consists of two independent scripts that work together:
-
-#### 1. **Python Script** (`claude_code_agent_farm.py`) - The Brain 🧠
-
-This is the main orchestrator that does all the heavy lifting:
-
-- **Creates and manages tmux sessions** with multiple panes
-- **Generates the error file** by running type-check and lint commands
-- **Launches Claude Code agents** in each tmux pane
-- **Monitors agent health** (context usage, work status, errors)
-- **Auto-restarts agents** when they complete tasks or hit issues
-- **Runs monitoring dashboard** in the tmux controller window
-- **Handles graceful shutdown** with Ctrl+C
-
-**You run this script and it stays running** (unless using `--no-monitor` mode). The monitoring dashboard is displayed in the tmux session's controller window, not in the launching terminal.
-
-#### 2. **Shell Script** (`view_agents.sh`) - The Window 🪟
-
-This is an optional convenience tool for viewing the tmux session:
-
-- **It does NOT interact with the Python script**
-- **Run it in a separate terminal** to peek at agent activity
-- **Provides different viewing modes** (grid, focus, split)
-- **Just a wrapper around tmux commands** for convenience
-
-Think of it like this:
-- **Python script** = Your car engine (does all the work)
-- **Shell script** = Your dashboard camera (lets you see what's happening)
-
-### Why Two Scripts?
-
-1. **Separation of Concerns**: Core logic (Python) vs viewing utilities (shell)
-2. **Flexibility**: You can monitor agents without the viewer script
-3. **Independence**: Either script can be used without the other
-
-## 🎮 Usage
-
-### Basic Command
-
+#### For Best Practices Implementation
 ```bash
-# Activate environment (if not using direnv)
-source .venv/bin/activate
+# Ensure you have a best practices guide in place
+cp best_practices_guides/NEXTJS15_BEST_PRACTICES.md /path/to/project/best_practices_guides/
 
-# Run with sample settings (20 agents)
-claude-code-agent-farm --path /path/to/your/typescript/project --config configs/sample.json
+# Run with best practices config
+claude-code-agent-farm --path /path/to/project --config configs/nextjs_best_practices_config.json
 ```
 
-### Common Usage Patterns
+## 🎮 Supported Workflows
+
+### 1. Bug Fixing Workflow
+
+Agents work through type-checker and linter problems in parallel:
+- Runs your configured type-check and lint commands
+- Generates a combined problems file
+- Agents select random chunks to fix
+- Marks completed problems to avoid duplication
+- Focuses on fixing existing issues
+
+### 2. Best Practices Implementation Workflow
+
+Agents systematically implement modern best practices:
+- Reads a comprehensive best practices guide
+- Creates a progress tracking document
+- Implements improvements in manageable chunks
+- Tracks completion percentage for each guideline
+- Maintains continuity between sessions
+
+## 🌐 Technology Stack Support
+
+### Built-in Support
+
+#### Next.js (TypeScript)
+- Tools: `bun`, `tsc`, `eslint`
+- Config: `configs/nextjs_config.json`
+- Best practices guide included
+
+#### Python
+- Tools: `mypy`, `ruff`, optional `uv`
+- Configs: `configs/python_config.json`, `configs/python_uv_config.json`
+- Supports modern Python patterns
+
+### Custom Tech Stacks
+
+Create your own configuration:
+
+```json
+{
+  "tech_stack": "rust",
+  "problem_commands": {
+    "type_check": ["cargo", "check"],
+    "lint": ["cargo", "clippy", "--", "-D", "warnings"]
+  },
+  "best_practices_files": ["./guides/RUST_BEST_PRACTICES.md"],
+  "chunk_size": 30,
+  "prompt_file": "prompts/rust_prompt.txt"
+}
+```
+
+## ⚙️ Configuration System
+
+### Core Configuration Options
+
+```json
+{
+  "comment": "Human-readable description",
+  "tech_stack": "nextjs",
+  "problem_commands": {
+    "type_check": ["bun", "run", "type-check"],
+    "lint": ["bun", "run", "lint"]
+  },
+  "best_practices_files": ["./best_practices_guides/NEXTJS15_BEST_PRACTICES.md"],
+  "chunk_size": 50,
+  "agents": 20,
+  "session": "claude_agents",
+  "prompt_file": "prompts/default_prompt_nextjs.txt",
+  "auto_restart": true,
+  "context_threshold": 20,
+  "idle_timeout": 60
+}
+```
+
+### Key Parameters
+
+- **tech_stack**: Technology identifier (nextjs, python, rust, etc.)
+- **problem_commands**: Commands for type-checking and linting
+- **best_practices_files**: Guides to copy to the project
+- **chunk_size**: How many lines/changes per agent iteration
+- **prompt_file**: Which prompt template to use
+- **auto_restart**: Enable automatic agent restart
+- **context_threshold**: Restart when context drops below this %
+
+### Command Line Options
+
+All configuration options can be overridden via CLI:
 
 ```bash
-# Quick test with 5 agents
-claude-code-agent-farm --path /your/project -n 5 --skip-regenerate
-
-# Production run with auto-restart
-claude-code-agent-farm --path /your/project --auto-restart --agents 20
-
-# Headless mode (no monitoring)
-claude-code-agent-farm --path /your/project --no-monitor --auto-restart
-
-# Skip git operations for faster iteration
-claude-code-agent-farm --path /your/project --skip-regenerate --skip-commit
-
-# Use custom configuration
-claude-code-agent-farm --path /your/project --config configs/production.json
-
-# Enable all convenience features
 claude-code-agent-farm \
-  --path /your/project \
-  --agents 12 \
-  --auto-restart \
-  --tmux-mouse \
-  --attach
-
-# At any time, drop into the dashboard only
-./view_agents.sh
+  --path /project \
+  --config configs/base.json \
+  --agents 10 \
+  --chunk-size 30 \
+  --auto-restart
 ```
 
-### Viewing Your Agents
+## 📝 Prompt System
 
-While the orchestrator is running, you have several options:
+### Prompt Types
 
-#### Option 1: Built-in Monitoring Dashboard
-The monitoring dashboard now runs inside the tmux controller window, allowing you to see both the dashboard and agents in the same tmux session:
+#### Bug Fixing Prompts
+- `default_prompt.txt` - Generic bug fixing
+- `default_prompt_nextjs.txt` - Next.js specific
+- `default_prompt_python.txt` - Python specific
+
+#### Best Practices Prompts
+- `default_best_practices_prompt.txt` - Generic implementation
+- `default_best_practices_prompt_nextjs.txt` - Next.js specific
+- `default_best_practices_prompt_python.txt` - Python specific
+- `continue_best_practices_prompt.txt` - Continue existing work
+
+### Variable Substitution
+
+Prompts support dynamic variables:
+- `{chunk_size}` - Replaced with configured chunk size
+
+Example in prompt:
+```
+Work on approximately {chunk_size} improvements at a time...
+```
+
+## 🔄 How It Works
+
+### Bug Fixing Workflow
+
+1. **Problem Generation**: Runs type-check and lint commands
+2. **Agent Launch**: Starts N agents in tmux panes
+3. **Task Distribution**: Each agent selects random problem chunks
+4. **Conflict Prevention**: Marks completed problems with [COMPLETED]
+5. **Progress Tracking**: Commits changes and tracks error reduction
+
+### Best Practices Workflow
+
+1. **Guide Distribution**: Copies best practices guides to project
+2. **Progress Document**: Agents create tracking document
+3. **Systematic Implementation**: Works through guidelines incrementally
+4. **Accurate Tracking**: Maintains honest completion percentages
+5. **Session Continuity**: Progress persists between runs
+
+## 📊 Monitoring and Viewing
+
+### Built-in Dashboard
+
+The monitoring dashboard runs in the tmux controller window:
 
 ```
 Claude Agent Farm - 14:32:15
@@ -192,300 +229,152 @@ Claude Agent Farm - 14:32:15
 └──────────┴────────────┴────────┴──────────┴──────────────┴────────┘
 ```
 
-To view it:
-- `tmux attach -t claude_agents:controller` - View monitoring dashboard
-- Use the viewer script (Option 2) for convenient split views
-
-#### Option 2: Tmux Viewer Script
-In a separate terminal:
+### Viewing Options
 
 ```bash
+# Use the viewer script
 ./view_agents.sh
-```
 
-Choose from:
-1. **Grid view** - See all agents at once
-2. **Focus mode** - Navigate between individual agents
-3. **Split view** - Monitor dashboard + agents side by side (recommended!)
-4. **Quick attach** - Direct tmux attachment
-
-#### Option 3: Direct tmux Commands
-
-```bash
-# List sessions
-tmux ls
-
-# Attach to session
+# Direct tmux commands
 tmux attach -t claude_agents
-
-# Navigate panes
-# Ctrl+B then arrow keys
-
-# Zoom into a pane
-# Ctrl+B then Z
-
-# Detach
-# Ctrl+B then D
+tmux attach -t claude_agents:controller  # Dashboard only
 ```
 
-## ⚙️ Configuration
+### Agent States
 
-### Command Line Options
-
-```
-Required:
-  --path PATH               Project root directory
-
-Agent Configuration:
-  --agents N, -n N         Number of agents (default: 20)
-  --session NAME, -s NAME  tmux session name (default: claude_agents)
-
-Timing:
-  --stagger SECONDS        Delay between starting agents (default: 4.0)
-  --wait-after-cc SECONDS  Wait time after launching cc (default: 3.0)
-  --check-interval SECONDS Health check interval (default: 10)
-
-Features:
-  --skip-regenerate        Skip regenerating problems file
-  --skip-commit           Skip git commit/push
-  --auto-restart          Enable automatic agent restart
-  --no-monitor            Just launch agents and exit
-  --attach                Attach to tmux after setup
-
-Advanced:
-  --prompt-file PATH      Custom prompt file
-  --config PATH           JSON configuration file
-  --context-threshold N    Restart agent when context ≤ N% (default: 20)
-  --idle-timeout SECONDS   Mark agent idle after N seconds (default: 60)
-  --max-errors N           Disable agent after N errors (default: 3)
-  --tmux-kill-on-exit      Kill tmux session on exit (default: true)
-  --no-tmux-kill-on-exit   Keep tmux session running after exit
-  --tmux-mouse             Enable tmux mouse support (default: true)
-  --no-tmux-mouse          Disable tmux mouse support
-  --fast-start             Skip shell prompt detection
-  --full-backup            Full backup of Claude settings before start
-```
-
-### Configuration Files
-
-Create reusable configurations in JSON:
-
-```json
-{
-    "path": "/data/projects/smartedgar-frontend",
-    "agents": 20,
-    "session": "claude_agents",
-    "stagger": 4.0,
-    "wait_after_cc": 3.0,
-    "check_interval": 10,
-    "skip_regenerate": false,
-    "skip_commit": false,
-    "auto_restart": true,
-    "no_monitor": false,
-    "attach": false,
-    "prompt_file": "prompts/bug_fixing_prompt_for_nextjs.txt",
-    "context_threshold": 20,
-    "idle_timeout": 60,
-    "max_errors": 3,
-    "verbose": false,
-    "log_file": null,
-    "git_branch": null,
-    "git_remote": "origin",
-    "batch_size": 50,
-    "max_agents": 50,
-    "tmux_kill_on_exit": true,
-    "tmux_mouse": true
-}
-```
-
-#### Configuration Options Explained:
-
-- **path**: Project root directory
-- **agents**: Number of Claude Code agents to run
-- **session**: tmux session name
-- **stagger**: Delay between starting each agent (seconds)
-- **wait_after_cc**: Wait time after launching cc before sending prompt
-- **check_interval**: How often to check agent health
-- **skip_regenerate**: Skip regenerating the problems file
-- **skip_commit**: Skip git commit/push step
-- **auto_restart**: Automatically restart agents on completion/error
-- **no_monitor**: Disable monitoring (just launch and exit)
-- **attach**: Attach to tmux session after setup
-- **prompt_file**: Path to custom prompt file (null = use default)
-- **context_threshold**: Restart when context drops below this percentage
-- **idle_timeout**: Seconds before marking an agent as idle
-- **max_errors**: Maximum errors before disabling an agent
-- **verbose**: Enable verbose logging
-- **log_file**: Path to log file (null = console only)
-- **git_branch**: Specific branch to use (null = current branch)
-- **git_remote**: Git remote to push to
-- **batch_size**: Lines per batch in the prompt
-- **max_agents**: Safety limit on maximum agents
-- **tmux_kill_on_exit**: Kill tmux session on orchestrator exit
-- **tmux_mouse**: Enable mouse support in tmux
-
-Use with: `claude-code-agent-farm --path /your/project --config configs/my-config.json`
-
-## 🔄 How It Works
-
-### 1. **Initialization Phase**
-- Changes to your project directory
-- Runs `bun run type-check` and `bun run lint` to generate error list
-- Commits the current error count to git
-- Creates a tmux session with N agent panes
-
-### 2. **Agent Launch Phase**
-- Starts Claude Code (`cc`) in each pane
-- Waits for it to initialize
-- Sends the task prompt with unique randomization seed
-- Staggers launches to prevent settings corruption
-
-### 3. **Monitoring Phase** (if enabled)
-- Continuously monitors each agent's status
-- Tracks context usage percentage
-- Detects when agents complete their work
-- Identifies settings corruption or errors
-- Auto-restarts agents based on configured conditions
-
-### 4. **The Task Prompt**
-Each agent receives instructions to:
-- Select random 50-line chunks from the error file
-- Mark selected lines with `[COMPLETED]` to prevent duplicates
-- Fix issues intelligently (not just quick patches)
-- Follow Next.js 15 best practices
-- Commit changes when done
-
-## 📊 Understanding Agent States
-
-- 🟡 **starting** - Agent is initializing
-- 🟢 **working** - Actively processing tasks
+- 🟡 **starting** - Agent initializing
+- 🟢 **working** - Actively processing
 - 🔵 **ready** - Waiting for input
-- 🟡 **idle** - Completed work, ready for restart
-- 🔴 **error** - Settings corruption or other error
-- ⚫ **unknown** - State unclear (rare)
+- 🟡 **idle** - Completed work
+- 🔴 **error** - Problem detected
+- ⚫ **unknown** - State unclear
+
+## 💡 Usage Examples
+
+### Quick Test Run
+```bash
+# 5 agents, skip git operations
+claude-code-agent-farm --path /project -n 5 --skip-regenerate --skip-commit
+```
+
+### Production Bug Fixing
+```bash
+# Full run with Python project
+claude-code-agent-farm \
+  --path /python/project \
+  --config configs/python_uv_config.json \
+  --agents 15 \
+  --auto-restart
+```
+
+### Best Practices Implementation
+```bash
+# Systematic improvements
+claude-code-agent-farm \
+  --path /nextjs/project \
+  --config configs/nextjs_best_practices_config.json \
+  --agents 10
+```
+
+### Custom Configuration
+```bash
+# Override config settings
+claude-code-agent-farm \
+  --path /project \
+  --config configs/base.json \
+  --chunk-size 25 \
+  --context-threshold 15 \
+  --idle-timeout 120
+```
 
 ## 🚨 Troubleshooting
 
 ### Common Issues
 
-#### "Settings corrupted" errors
-- Increase `--stagger` time (try 6-8 seconds)
-- Reduce number of concurrent agents
-- Ensure Claude Code works when run manually
-
 #### Agents not starting
-- Verify `cc` alias is configured: `alias | grep cc`
-- If not, run: `alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"`
-- Check Claude Code is configured with valid API key
-- Try running `cc` manually first
-- Increase `--wait-after-cc` if Claude Code loads slowly
+- Verify `cc` alias: `alias | grep cc`
+- Test Claude Code manually: `cc`
+- Check API key configuration
+- Increase `--wait-after-cc` timing
 
-#### High memory usage
+#### Configuration errors
+- Validate JSON syntax
+- Ensure all paths are correct
+- Check command availability (mypy, ruff, etc.)
+
+#### Resource issues
 - Each agent uses ~500MB RAM
-- Reduce agent count or run in batches
-- Monitor with `htop` during execution
-
-#### tmux session issues
-```bash
-# Kill stuck session
-tmux kill-session -t claude_agents
-
-# List all sessions
-tmux ls
-
-# Kill all tmux sessions (nuclear option)
-tmux kill-server
-```
-
-## 💡 Pro Tips
-
-1. **Start Small**: Test with 3-5 agents before scaling up
-2. **Monitor First Run**: Watch the first cycle to ensure proper behavior
-3. **Resource Planning**: Plan for ~500MB RAM per agent
-4. **Stagger Timing**: Increase stagger time if you see corruption
-5. **Git Workflow**: Always pull before starting (script auto-commits)
-6. **Context Management**: Agents restart at 20% context remaining
-7. **Batch Processing**: For 50+ agents, consider multiple runs
-
-## 🔧 Advanced Usage
-
-### Running Multiple Projects
-
-```bash
-# Terminal 1
-claude-code-agent-farm --path /project1 --session project1-agents
-
-# Terminal 2
-claude-code-agent-farm --path /project2 --session project2-agents
-```
-
-### Custom Prompts
-
-Create a custom prompt file:
-```bash
-echo "Your custom instructions..." > prompts/my-prompt.txt
-claude-code-agent-farm --path /project --prompt-file prompts/my-prompt.txt
-```
-
-### Automated/Cron Usage
-
-For unattended operation:
-```bash
-#!/bin/bash
-cd /path/to/agent-farm
-source .venv/bin/activate
-claude-code-agent-farm \
-  --path /project \
-  --agents 10 \
-  --no-monitor \
-  --auto-restart \
-  --config configs/overnight.json
-```
+- Reduce agent count if needed
+- Monitor with `htop`
 
 ## 📁 Project Structure
 
 ```
 claude_code_agent_farm/
-├── claude_code_agent_farm.py   # Main orchestrator (Python)
-├── view_agents.sh               # Tmux viewer utility (Bash)
-├── setup.sh                     # Automated setup script
-├── __init__.py                  # Python package file
-├── pyproject.toml              # Project configuration
-├── .envrc                      # Direnv configuration
-├── configs/                    # Configuration files
-│   └── sample.json            # Example configuration
-├── prompts/                    # Custom prompt files
-└── README.md                   # This file
+├── claude_code_agent_farm.py    # Main orchestrator
+├── view_agents.sh               # Tmux viewer utility
+├── setup.sh                     # Automated setup
+├── configs/                     # Configuration files
+│   ├── nextjs_config.json      # Next.js bug fixing
+│   ├── python_config.json      # Python bug fixing
+│   ├── python_uv_config.json   # Python with uv
+│   └── nextjs_best_practices_config.json
+├── prompts/                     # Prompt templates
+│   ├── default_prompt_*.txt    # Bug fixing prompts
+│   └── default_best_practices_*.txt
+├── best_practices_guides/       # Best practices documents
+│   └── NEXTJS15_BEST_PRACTICES.md
+└── README_MODULAR_SYSTEM.md     # Detailed configuration guide
+```
+
+## 🔧 Advanced Topics
+
+### Creating Custom Workflows
+
+1. **Define your tech stack config**
+2. **Create appropriate prompts**
+3. **Add best practices guides** (optional)
+4. **Configure problem commands**
+
+### Scaling Considerations
+
+- Start small (5-10 agents) and scale up
+- Increase stagger time for many agents
+- Consider running in batches for 50+ agents
+- Use `--no-monitor` for headless operation
+
+### Integration with CI/CD
+
+```bash
+#!/bin/bash
+# Automated code improvement script
+claude-code-agent-farm \
+  --path $PROJECT_PATH \
+  --config configs/ci-config.json \
+  --no-monitor \
+  --auto-restart \
+  --skip-commit
 ```
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
-
+Contributions welcome! Please:
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+3. Add tests if applicable
+4. Submit a pull request
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details
+MIT License - see [LICENSE](LICENSE) file
 
-## 🙏 Acknowledgments
+## ⚠️ Important Notes
 
-- Built for use with [Claude Code](https://www.anthropic.com/)
-- Inspired by the need to parallelize AI-assisted code improvement
-- Thanks to the tmux and Python communities
-
-## ⚠️ Disclaimer
-
-This tool runs multiple AI agents that will modify your code. Always:
-- Back up your code before running
-- Review changes before committing
-- Start with a small number of agents
-- Monitor the first few cycles
+- **Always backup your code** before running
+- **Review changes** before committing
+- **Start with few agents** to test
+- **Monitor first runs** to ensure proper behavior
 
 ---
 
-*Happy farming! 🚜 May your type errors be few and your agents be many.*
+*Happy farming! 🚜 May your code be clean and your agents productive.*
