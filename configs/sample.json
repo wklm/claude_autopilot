@@ -1,5 +1,6 @@
 {
     "comment": "This is a sample configuration. The 'path' parameter is still required via CLI.",
+    "chunk_size": 50,
     "agents": 8,
     "session": "claude_agents",
     "stagger": 6.0,

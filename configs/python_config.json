@@ -6,6 +6,7 @@
     "lint": ["ruff", "check", "."]
   },
   "best_practices_files": [],
+  "chunk_size": 50,
   "agents": 20,
   "session": "claude_agents",
   "stagger": 10.0,

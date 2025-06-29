@@ -723,7 +723,7 @@ class ClaudeAgentFarm:
                 console.print(f"  - {filename}")
 
     def _load_prompt(self) -> str:
-        """Load prompt from file or use default"""
+        """Load prompt from file and substitute variables"""
         if self.prompt_file:
             prompt_path = Path(self.prompt_file)
             if not prompt_path.exists():
@@ -732,21 +732,32 @@ class ClaudeAgentFarm:
             prompt_text = prompt_path.read_text().strip()
             if not prompt_text:
                 raise ValueError(f"Prompt file is empty: {self.prompt_file}")
-            return prompt_text
+        else:
+            # Try to find a default prompt file
+            default_prompts = [
+                self.project_path / "prompts" / f"default_prompt_{getattr(self, 'tech_stack', 'nextjs')}.txt",
+                self.project_path / "prompts" / "default_prompt.txt",
+                Path(__file__).parent / "prompts" / f"default_prompt_{getattr(self, 'tech_stack', 'nextjs')}.txt",
+                Path(__file__).parent / "prompts" / "default_prompt.txt",
+            ]
+            
+            prompt_text = None
+            for prompt_path in default_prompts:
+                if prompt_path.exists():
+                    prompt_text = prompt_path.read_text().strip()
+                    break
+            
+            if not prompt_text:
+                raise ValueError("No prompt file specified and no default prompt found. Use --prompt-file to specify a prompt.")
         
-        # Try to find a default prompt file
-        default_prompts = [
-            self.project_path / "prompts" / f"default_prompt_{getattr(self, 'tech_stack', 'nextjs')}.txt",
-            self.project_path / "prompts" / "default_prompt.txt",
-            Path(__file__).parent / "prompts" / f"default_prompt_{getattr(self, 'tech_stack', 'nextjs')}.txt",
-            Path(__file__).parent / "prompts" / "default_prompt.txt",
-        ]
+        # Substitute variables in the prompt
+        chunk_size = getattr(self, 'chunk_size', 50)
+        prompt_text = prompt_text.replace('{chunk_size}', str(chunk_size))
         
-        for prompt_path in default_prompts:
-            if prompt_path.exists():
-                return prompt_path.read_text().strip()
+        # Future: could add more substitutions here
+        # prompt_text = prompt_text.replace('{tech_stack}', getattr(self, 'tech_stack', 'generic'))
         
-        raise ValueError("No prompt file specified and no default prompt found. Use --prompt-file to specify a prompt.")
+        return prompt_text
 
     def regenerate_problems(self) -> None:
         """Regenerate the type-checker and linter problems file"""

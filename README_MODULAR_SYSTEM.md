@@ -1,6 +1,6 @@
 # Claude Code Agent Farm - Modular System
 
-The Claude Code Agent Farm has been updated to support multiple technology stacks and configurable problem generation commands.
+The Claude Code Agent Farm has been updated to support multiple technology stacks, configurable problem generation commands, and different workflow types (bug fixing vs best practices implementation).
 
 ## Tech Stack Support
 
@@ -8,6 +8,14 @@ The system now supports different technology stacks out of the box:
 
 - **Next.js** (TypeScript) - Using `bun`, `eslint`, and `tsc`
 - **Python** - Using `mypy` and `ruff` (with optional `uv` package manager)
+
+## Workflow Types
+
+### 1. Bug Fixing Workflow (Traditional)
+Agents work through type-checker and linter problems in parallel, fixing issues in batches.
+
+### 2. Best Practices Implementation Workflow
+Agents systematically implement modern best practices from a guide, tracking progress in a structured document.
 
 ## Configuration System
 
@@ -32,6 +40,18 @@ python claude_code_agent_farm.py --path /path/to/project --config configs/python
   }
 }
 ```
+
+#### Chunk Size Configuration
+
+The `chunk_size` parameter controls how many lines/changes agents work on at once:
+
+```json
+{
+  "chunk_size": 50  // Default is 50, can be adjusted based on task complexity
+}
+```
+
+This value is substituted into prompts wherever `{chunk_size}` appears.
 
 #### Best Practices Guides
 
@@ -59,6 +79,7 @@ Specify individual file paths, and they'll be copied to `{project}/best_practice
     "lint": ["uv", "run", "ruff", "check", "src", "tests"]
   },
   "best_practices_files": ["./best_practices_guides/PYTHON_BEST_PRACTICES.md"],
+  "chunk_size": 50,
   "agents": 20,
   "session": "claude_agents",
   "stagger": 10.0,
@@ -93,21 +114,42 @@ The system looks for prompts in this order:
 2. Tech-stack specific default: `prompts/default_prompt_{tech_stack}.txt`
 3. Generic default: `prompts/default_prompt.txt`
 
+### Prompt Types
+
+#### Bug Fixing Prompts
+- `default_prompt.txt` - Generic bug fixing
+- `default_prompt_nextjs.txt` - Next.js specific bug fixing
+- `default_prompt_python.txt` - Python specific bug fixing
+- `bug_fixing_prompt_for_nextjs.txt` - Original Next.js bug fixing prompt
+
+#### Best Practices Implementation Prompts
+- `default_best_practices_prompt.txt` - Generic best practices implementation
+- `default_best_practices_prompt_nextjs.txt` - Next.js best practices implementation
+- `default_best_practices_prompt_python.txt` - Python best practices implementation
+- `continue_best_practices_prompt.txt` - For continuing existing progress
+
 ### Custom Prompts
 
 Create tech-stack specific prompts that reference the appropriate tools and best practices:
 
 ```bash
-# For Python projects
-python claude_code_agent_farm.py --path /path/to/project --prompt-file prompts/python_async_prompt.txt
+# For bug fixing
+python claude_code_agent_farm.py --path /path/to/project --config configs/nextjs_config.json
 
-# For Next.js projects  
-python claude_code_agent_farm.py --path /path/to/project --prompt-file prompts/nextjs_app_router_prompt.txt
+# For best practices implementation
+python claude_code_agent_farm.py --path /path/to/project --config configs/nextjs_best_practices_config.json
 ```
+
+### Variable Substitution
+
+Prompts support variable substitution:
+- `{chunk_size}` - Replaced with the configured chunk size (default: 50)
 
 ## Examples
 
-### Python Project with uv
+### Bug Fixing Workflow
+
+#### Python Project with uv
 
 ```bash
 python claude_code_agent_farm.py \
@@ -116,13 +158,41 @@ python claude_code_agent_farm.py \
   --agents 15
 ```
 
-### Next.js Project
+#### Next.js Project
 
 ```bash
 python claude_code_agent_farm.py \
   --path /path/to/nextjs/project \
   --config configs/nextjs_config.json \
   --agents 20
+```
+
+### Best Practices Implementation Workflow
+
+#### Next.js Best Practices
+
+```bash
+# First, ensure you have NEXTJS15_BEST_PRACTICES.md in best_practices_guides/
+python claude_code_agent_farm.py \
+  --path /path/to/nextjs/project \
+  --config configs/nextjs_best_practices_config.json \
+  --agents 10
+```
+
+This will:
+1. Have agents read the best practices guide
+2. Create a progress tracking document
+3. Systematically implement the practices
+4. Track completion status accurately
+
+#### Continuing Best Practices Work
+
+```bash
+python claude_code_agent_farm.py \
+  --path /path/to/project \
+  --prompt-file prompts/continue_best_practices_prompt.txt \
+  --config configs/nextjs_best_practices_config.json \
+  --agents 10
 ```
 
 ### Custom Tech Stack

@@ -1,0 +1,25 @@
+First I need you to CAREFULLY review any Python best practices guides in the best_practices_guides/ directory. If no specific guide exists, apply general Python best practices including:
+- PEP 8 style guidelines
+- Type hints on all functions and methods
+- Proper error handling with specific exception types
+- Clear docstrings following Google or NumPy style
+- Async/await patterns where appropriate
+- Proper dependency injection and avoiding global state
+- Efficient data structures and algorithms
+
+Create a new document called PYTHON_BEST_PRACTICES_IMPLEMENTATION_PROGRESS.md where you keep track of what you've done and what remains to be done. This document should:
+- List each major best practice category being applied
+- Track the implementation status of each practice (0%, 25%, 50%, 75%, 100%)
+- Include specific notes about what was changed and what files were affected
+- Be ACTUALLY accurate and not exaggerate or mislead about completion status
+
+Work on approximately {chunk_size} improvements at a time, focusing on related best practices. Keep close track of what has been done already and what remains to be done at a granular level.
+
+IMPORTANT:
+- Use proper refactoring techniques to avoid breaking existing functionality
+- Add type hints incrementally, ensuring they're accurate
+- Update the progress document after each set of changes
+- Consider the impact on tests and update them as needed
+- Be honest about partial implementations
+
+When you're done with this batch of improvements, commit your progress to git with a detailed commit message explaining what best practices were implemented. 

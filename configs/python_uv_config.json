@@ -6,6 +6,7 @@
     "lint": ["uv", "run", "ruff", "check", "src", "tests", "--fix"]
   },
   "best_practices_files": [],
+  "chunk_size": 75,
   "agents": 15,
   "session": "claude_agents",
   "stagger": 12.0,
