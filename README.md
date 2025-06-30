@@ -72,6 +72,45 @@ cp best_practices_guides/NEXTJS15_BEST_PRACTICES.md /path/to/project/best_practi
 claude-code-agent-farm --path /path/to/project --config configs/nextjs_best_practices_config.json
 ```
 
+## 📖 Understanding the Architecture
+
+### The Two-Script System
+
+This project consists of two independent scripts that work together:
+
+#### 1. **Python Script** (`claude_code_agent_farm.py`) - The Brain 🧠
+
+This is the main orchestrator that does all the heavy lifting:
+
+- **Creates and manages tmux sessions** with multiple panes
+- **Generates the problems file** by running configured commands
+- **Launches Claude Code agents** in each tmux pane
+- **Monitors agent health** (context usage, work status, errors)
+- **Auto-restarts agents** when they complete tasks or hit issues
+- **Runs monitoring dashboard** in the tmux controller window
+- **Handles graceful shutdown** with Ctrl+C
+
+**You run this script and it stays running** (unless using `--no-monitor` mode). The monitoring dashboard is displayed in the tmux session's controller window, not in the launching terminal.
+
+#### 2. **Shell Script** (`view_agents.sh`) - The Window 🪟
+
+This is an optional convenience tool for viewing the tmux session:
+
+- **It does NOT interact with the Python script**
+- **Run it in a separate terminal** to peek at agent activity
+- **Provides different viewing modes** (grid, focus, split)
+- **Just a wrapper around tmux commands** for convenience
+
+Think of it like this:
+- **Python script** = Your car engine (does all the work)
+- **Shell script** = Your dashboard camera (lets you see what's happening)
+
+### Why Two Scripts?
+
+1. **Separation of Concerns**: Core logic (Python) vs viewing utilities (shell)
+2. **Flexibility**: You can monitor agents without the viewer script
+3. **Independence**: Either script can be used without the other
+
 ## 🎮 Supported Workflows
 
 ### 1. Bug Fixing Workflow
@@ -169,6 +208,42 @@ claude-code-agent-farm \
   --auto-restart
 ```
 
+#### Complete Options Reference
+
+```
+Required:
+  --path PATH               Project root directory
+
+Agent Configuration:
+  --agents N, -n N         Number of agents (default: 20)
+  --session NAME, -s NAME  tmux session name (default: claude_agents)
+
+Timing:
+  --stagger SECONDS        Delay between starting agents (default: 10.0)
+  --wait-after-cc SECONDS  Wait time after launching cc (default: 15.0)
+  --check-interval SECONDS Health check interval (default: 10)
+
+Features:
+  --skip-regenerate        Skip regenerating problems file
+  --skip-commit           Skip git commit/push
+  --auto-restart          Enable automatic agent restart
+  --no-monitor            Just launch agents and exit
+  --attach                Attach to tmux after setup
+
+Advanced:
+  --prompt-file PATH      Custom prompt file
+  --config PATH           JSON configuration file
+  --context-threshold N    Restart agent when context ≤ N% (default: 20)
+  --idle-timeout SECONDS   Mark agent idle after N seconds (default: 60)
+  --max-errors N           Disable agent after N errors (default: 3)
+  --tmux-kill-on-exit      Kill tmux session on exit (default: true)
+  --no-tmux-kill-on-exit   Keep tmux session running after exit
+  --tmux-mouse             Enable tmux mouse support (default: true)
+  --no-tmux-mouse          Disable tmux mouse support
+  --fast-start             Skip shell prompt detection
+  --full-backup            Full backup of Claude settings before start
+```
+
 ## 📝 Prompt System
 
 ### Prompt Types
@@ -212,7 +287,15 @@ Work on approximately {chunk_size} improvements at a time...
 4. **Accurate Tracking**: Maintains honest completion percentages
 5. **Session Continuity**: Progress persists between runs
 
-## 📊 Monitoring and Viewing
+## 📊 Monitoring Dashboard
+
+The Python script includes a real-time monitoring dashboard that shows:
+
+- **Agent Status**: Working, Idle, Context Low, Error, Disabled
+- **Context Usage**: Percentage of agent's context window used
+- **Last Activity**: Time since the agent last did something
+- **Last Error**: Most recent error message (if any)
+- **Session Stats**: Total restarts, uptime, active agents
 
 ### Built-in Dashboard
 
