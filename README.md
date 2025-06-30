@@ -14,14 +14,14 @@ Claude Code Agent Farm is a powerful orchestration framework that runs multiple 
 
 - 🚀 **Parallel Processing**: Run 20+ Claude Code agents simultaneously (up to 50 with `max_agents` config)
 - 🎯 **Multiple Workflows**: Bug fixing or best practices implementation
-- 🌐 **Multi-Stack Support**: 29 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
+- 🌐 **Multi-Stack Support**: 33 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
 - 📊 **Smart Monitoring**: Real-time dashboard showing agent status and progress
 - 🔄 **Auto-Recovery**: Automatically restarts agents when needed
 - 📈 **Progress Tracking**: Git commits and structured progress documents
 - ⚙️ **Highly Configurable**: JSON configs with variable substitution
 - 🖥️ **Flexible Viewing**: Multiple tmux viewing modes
 - 🔒 **Safe Operation**: Automatic settings backup/restore, file locking, atomic operations
-- 🛠️ **Development Setup**: 13 integrated tool installation scripts for complete environments
+- 🛠️ **Development Setup**: 24 integrated tool installation scripts for complete environments
 
 ## 📋 Prerequisites
 
@@ -129,11 +129,26 @@ Or run specific setups directly:
 11. **Serverless Edge** (`setup_serverless_edge.sh`)
     - Serverless and edge computing tools
 
-12. **Angular** (`setup_angular.sh`)
+12. **Terraform Azure** (`setup_terraform_azure.sh`)
+    - Terraform, Azure CLI, infrastructure tools
+
+13. **Angular** (`setup_angular.sh`)
     - Node.js, Angular CLI, TypeScript, testing tools
 
-13. **Flutter** (`setup_flutter.sh`)
+14. **Flutter** (`setup_flutter.sh`)
     - Flutter SDK, Dart, Android Studio, development tools
+
+15. **React Native** (`setup_react_native.sh`)
+    - React Native CLI, mobile development tools
+
+Additional setup scripts are available for:
+- **PHP/Laravel** (`setup_php_laravel.sh`)
+- **C++ Systems** (`setup_cpp_systems.sh`)
+- **Solana/Anchor** (`setup_solana_anchor.sh`)
+- **Ansible** (`setup_ansible.sh`)
+- **LLM Dev Testing** (`setup_llm_dev_testing.sh`)
+- **LLM Eval Observability** (`setup_llm_eval_observability.sh`)
+- **Kubernetes AI** (`setup_kubernetes_ai_inference.sh`)
 
 ### Setup Features
 
@@ -221,7 +236,7 @@ Agents systematically implement modern best practices:
 
 ## 🌐 Technology Stack Support
 
-### Complete List of 29 Supported Tech Stacks
+### Complete List of 33 Supported Tech Stacks
 
 The project includes pre-configured support for:
 
@@ -251,18 +266,22 @@ The project includes pre-configured support for:
 
 #### Data & AI
 19. **GenAI/LLM Ops** - AI/ML operations and tooling
-20. **Data Engineering** - ETL, analytics, big data
-21. **Data Lakes** - Kafka, Snowflake, Spark integration
-22. **Polars/DuckDB** - High-performance data processing
-23. **Excel Automation** - Python-based Excel automation with Azure
+20. **LLM Dev Testing** - LLM development and testing workflows
+21. **LLM Evaluation & Observability** - LLM evaluation and monitoring
+22. **Data Engineering** - ETL, analytics, big data
+23. **Data Lakes** - Kafka, Snowflake, Spark integration
+24. **Polars/DuckDB** - High-performance data processing
+25. **Excel Automation** - Python-based Excel automation with Azure
 
 #### Specialized Domains
-24. **Serverless Edge** - Edge computing and serverless
-25. **Security Engineering** - Security best practices and tooling
-26. **Hardware Development** - Embedded systems and hardware design
-27. **Unreal Engine** - Game development with Unreal Engine 5
-28. **Solana/Anchor** - Blockchain development on Solana
-29. **Cosmos** - Cosmos blockchain ecosystem
+26. **Serverless Edge** - Edge computing and serverless
+27. **Kubernetes AI Inference** - AI inference on Kubernetes
+28. **Security Engineering** - Security best practices and tooling
+29. **Hardware Development** - Embedded systems and hardware design
+30. **Unreal Engine** - Game development with Unreal Engine 5
+31. **Solana/Anchor** - Blockchain development on Solana
+32. **Cosmos** - Cosmos blockchain ecosystem
+33. **React Native** - Cross-platform mobile development
 
 Each stack includes:
 - Optimized configuration file
@@ -334,7 +353,7 @@ Create your own configuration:
 
 ### Key Parameters
 
-- **tech_stack**: Technology identifier (one of 29 supported stacks)
+- **tech_stack**: Technology identifier (one of 33 supported stacks)
 - **problem_commands**: Commands for type-checking, linting, and testing
 - **best_practices_files**: Guides to copy to the project
 - **chunk_size**: How many lines/changes per agent iteration (varies by stack: 20-75)
@@ -437,20 +456,24 @@ The system includes specialized prompts for all workflows and tech stacks:
 - `default_best_practices_prompt_ansible.txt` - Ansible automation
 - `default_best_practices_prompt_vault.txt` - HashiCorp Vault
 
-##### Data & AI (5)
+##### Data & AI (7)
 - `default_best_practices_prompt_genai_llm_ops.txt` - AI/ML ops
+- `default_best_practices_prompt_llm_dev_testing.txt` - LLM development
+- `default_best_practices_prompt_llm_eval_observability.txt` - LLM evaluation
 - `default_best_practices_prompt_data_engineering.txt` - Data pipelines
 - `default_best_practices_prompt_data_lakes.txt` - Data lakes
 - `default_best_practices_prompt_polars.txt` - Polars/DuckDB
 - `default_best_practices_prompt_excel.txt` - Excel automation
 
-##### Specialized (5)
+##### Specialized (7)
 - `default_best_practices_prompt_serverless_edge.txt` - Edge computing
+- `default_best_practices_prompt_kubernetes_ai.txt` - Kubernetes AI
 - `default_best_practices_prompt_security.txt` - Security engineering
 - `default_best_practices_prompt_hardware.txt` - Hardware development
 - `default_best_practices_prompt_unreal.txt` - Unreal Engine
 - `default_best_practices_prompt_solana.txt` - Solana blockchain
 - `default_best_practices_prompt_cosmos.txt` - Cosmos blockchain
+- `default_best_practices_prompt_react_native.txt` - React Native
 
 ### Variable Substitution
 
@@ -483,13 +506,31 @@ Work on approximately {chunk_size} improvements at a time...
 ### Safety Features
 
 1. **Settings Backup**: Automatically backs up Claude settings before starting
+   - Creates timestamped backups in `~/.claude/backups/`
+   - Keeps last 10 backups with automatic rotation
+   - Full backup option with `--full-backup` flag
 2. **Settings Restore**: Restores from backup if corruption detected
+   - Automatic detection of settings errors
+   - Seamless restoration during agent startup
 3. **File Locking**: Uses file locks to prevent concurrent access issues
-4. **Atomic Operations**: Uses atomic file operations for safety
-5. **Emergency Cleanup**: Handles unexpected exits gracefully
-6. **Launch Locking**: Prevents concurrent Claude launches with lock files
-7. **Dynamic Stagger**: Adjusts launch delays based on error detection
-8. **Agent Limits**: Enforces max_agents limit (default: 50)
+   - Lock files in `~/.claude/.agent_farm_launch.lock`
+   - 30-second stale lock detection and cleanup
+   - Prevents concurrent Claude launches that could corrupt settings
+4. **Permission Management**: Automatically fixes file permissions
+   - Sets 600 permissions on settings.json
+   - Sets 700 permissions on .claude directory
+   - Ensures proper file ownership
+5. **Atomic Operations**: Uses atomic file operations for safety
+6. **Emergency Cleanup**: Handles unexpected exits gracefully
+   - Cleans up tmux sessions
+   - Removes lock files
+   - Deletes state files
+7. **Launch Locking**: Prevents concurrent Claude launches with lock files
+8. **Dynamic Stagger**: Adjusts launch delays based on error detection
+   - Doubles stagger time when corruption detected
+   - Gradual increase based on agent count
+9. **Agent Limits**: Enforces max_agents limit (default: 50)
+10. **Instance Randomization**: Adds unique seeds to each agent for better work distribution
 
 ## 📊 Monitoring Dashboard
 
@@ -537,12 +578,45 @@ tmux attach -t claude_agents:controller  # Dashboard only
 - 🔴 **error** - Problem detected
 - ⚫ **unknown** - State unclear
 
+### Auto-Restart Features
+
+When `--auto-restart` is enabled:
+- Monitors agent health continuously
+- Restarts agents that hit errors or go idle
+- Implements exponential backoff to prevent restart loops
+  - Initial wait: 10 seconds
+  - Doubles with each restart (max 5 minutes)
+- Tracks restart count per agent
+- Disables agents after max_errors threshold
+
 ### Monitor State File
 
 The system writes monitor state to `.claude_agent_farm_state.json` in the project directory. This file contains:
 - Agent statuses and health metrics
 - Session information
 - Runtime statistics
+
+Structure:
+```json
+{
+  "session": "claude_agents",
+  "num_agents": 20,
+  "agents": {
+    "0": {
+      "status": "working",
+      "start_time": "2024-01-15T10:30:00",
+      "last_activity": "2024-01-15T10:35:00",
+      "last_restart": null,
+      "cycles": 2,
+      "last_context": 75,
+      "errors": 0,
+      "restart_count": 0
+    }
+  },
+  "start_time": "2024-01-15T10:30:00",
+  "timestamp": "2024-01-15T10:35:00"
+}
+```
 
 External tools can read this file to monitor the farm's progress.
 
@@ -695,17 +769,17 @@ claude_code_agent_farm/
 │   ├── solana_anchor_config.json # Solana blockchain
 │   ├── cosmos_blockchain_config.json # Cosmos blockchain
 │   └── sample.json             # Example configuration
-├── prompts/                     # 36 prompt templates
+├── prompts/                     # 40 prompt templates
 │   ├── Bug fixing prompts (4)
 │   ├── Generic best practices prompts (2)
-│   └── Stack-specific best practices prompts (30)
-├── best_practices_guides/       # 30 best practices documents
+│   └── Stack-specific best practices prompts (34)
+├── best_practices_guides/       # 34 best practices documents
 │   ├── Web Development (7 guides)
 │   ├── Systems & Languages (7 guides)
 │   ├── DevOps & Infrastructure (5 guides)
 │   ├── Data & AI (5 guides)
 │   └── Specialized Domains (6 guides)
-├── tool_setup_scripts/          # 13 development environment setup scripts
+├── tool_setup_scripts/          # 24 development environment setup scripts
 │   ├── setup.sh                # Interactive menu
 │   ├── common_utils.sh         # Shared utilities
 │   ├── README.md              # Setup scripts documentation
@@ -766,11 +840,52 @@ Configure custom git branches and remotes in your config:
 ### Performance Tuning
 
 - **Chunk Size**: Smaller chunks (20-30) for complex tasks, larger (50-75) for simple fixes
+  - Recommended sizes by stack: Python (50), Next.js (50), Rust (30), Go (40), Java (35)
 - **Stagger Time**: Increase for many agents or slow systems
+  - Default 10s prevents settings corruption
+  - Automatically doubles on error detection
 - **Context Threshold**: Lower values (15-20%) restart agents sooner
 - **Idle Timeout**: Adjust based on task complexity
 - **Check Interval**: Balance between responsiveness and CPU usage
 - **Max Agents**: Increase beyond 50 for powerful systems
+- **Wait After CC**: Default 15s ensures Claude is fully ready
+  - Increase if seeing startup failures
+
+### Advanced Features
+
+#### Interruptible Operations
+- All long-running operations can be interrupted with Ctrl+C
+- Graceful shutdown preserves work in progress
+- Emergency cleanup on unexpected exits
+
+#### Smart Error Detection
+- Detects multiple error conditions:
+  - Settings corruption
+  - Authentication failures  
+  - Welcome/setup screens
+  - Command not found errors
+  - Parse errors (TypeError, SyntaxError, JSONDecodeError)
+  - Login prompts and API key issues
+- Automatic recovery attempts before disabling agents
+- Preserves other working agents during recovery
+
+#### Variable Substitution in Prompts
+- `{chunk_size}` - Replaced with configured chunk size
+- Supports regex patterns for flexible prompt templates
+
+#### Session Name Validation
+- Only allows letters, numbers, hyphens, and underscores
+- Prevents tmux errors from invalid characters
+
+#### Shell Prompt Detection
+- Intelligently waits for shell prompts before sending commands
+- `--fast-start` flag skips prompt detection for faster launches
+- Handles both bash and zsh prompts
+
+#### User Confirmations
+- Interruptible confirmation prompts (Ctrl+C uses default)
+- Safe defaults for all destructive operations
+- Clear messaging for all user interactions
 
 ## 🤝 Contributing
 
@@ -786,7 +901,7 @@ Contributions welcome! Please:
 1. Create config file in `configs/` (33 examples to follow)
 2. Add prompts in `prompts/` (36 examples available)
 3. Write best practices guide in `best_practices_guides/` (30 examples)
-4. Add setup script in `tool_setup_scripts/` (13 examples)
+4. Add setup script in `tool_setup_scripts/` (15 examples)
 5. Test thoroughly with various project types
 6. Update this README with your addition
 
@@ -808,6 +923,27 @@ MIT License - see [LICENSE](LICENSE) file
 - **Verify cc alias** is properly configured
 - **Ensure git is configured** with proper credentials
 - **Respect agent limits** (default max: 50)
+- **Claude settings** are automatically backed up and restored
+- **Lock files** prevent concurrent launches and corruption
+- **State files** enable external monitoring tools
+
+## 🔍 Additional Resources
+
+### Monitoring Tools
+- Monitor state file (`.claude_agent_farm_state.json`) for external integrations
+- tmux session logs for debugging agent issues
+- Git commit history for tracking improvements
+
+### Recovery Options
+- Manual settings restore from `~/.claude/backups/`
+- Lock file cleanup: `rm ~/.claude/.agent_farm_launch.lock`
+- Emergency session cleanup: `tmux kill-session -t claude_agents`
+
+### Performance Optimization
+- Use SSDs for better file I/O performance
+- Allocate 500MB RAM per agent
+- Consider network bandwidth for API calls
+- Monitor CPU usage with `htop` during runs
 
 ---
 
@@ -819,18 +955,18 @@ MIT License - see [LICENSE](LICENSE) file
 
 | Category | Count | Examples |
 |----------|-------|----------|
-| Web Development | 7 | Next.js, Angular, Flutter, Laravel |
+| Web Development | 8 | Next.js, Angular, Flutter, Laravel, React Native |
 | Systems & Languages | 7 | Python, Rust, Go, Java, C++ |
-| DevOps & Infrastructure | 5 | Terraform, Kubernetes, Ansible |
-| Data & AI | 5 | GenAI/LLM, Data Lakes, Polars |
-| Specialized | 6 | Security, Hardware, Blockchain |
-| **Total** | **29** | |
+| DevOps & Infrastructure | 6 | Terraform, Kubernetes, Ansible |
+| Data & AI | 7 | GenAI/LLM, LLM Dev/Testing, Data Lakes, Polars |
+| Specialized | 5 | Security, Hardware, Blockchain |
+| **Total** | **33** | |
 
 ### Resource Summary
 
 | Resource | Count |
 |----------|-------|
-| Configuration Files | 33 |
-| Prompt Templates | 36 |
-| Best Practices Guides | 30 |
-| Tool Setup Scripts | 13 |
+| Configuration Files | 37 |
+| Prompt Templates | 40 |
+| Best Practices Guides | 34 |
+| Tool Setup Scripts | 24 |
