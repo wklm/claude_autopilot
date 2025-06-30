@@ -1,16 +1,16 @@
-# Laravel 11 Production Best Practices Guide (Mid-2025 Edition)
+# Laravel 12 Production Best Practices Guide (Late 2025 Edition)
 
-A comprehensive, opinionated guide for building scalable, secure, and performant web applications with Laravel 11, emphasizing modern PHP 8.4+ features, type safety, and production-grade patterns.
+A comprehensive, opinionated guide for building scalable, secure, and performant web applications with Laravel 12, emphasizing modern PHP 8.4+ features, type safety, and production-grade patterns.
 
 ## Prerequisites & Initial Setup
 
-This guide assumes **Laravel 11.x**, **PHP 8.4+**, **Composer 2.8+**, and **Node.js 22+**. We'll leverage PHP 8.4's property hooks, improved performance, and enhanced type system throughout.
+This guide assumes **Laravel 12.x**, **PHP 8.4+**, **Composer 2.9+**, and **Node.js 22+**. We'll leverage PHP 8.4's property hooks, improved performance, and enhanced type system throughout.
 
 ### Project Initialization with Modern Tooling
 
 ```bash
 # Create new Laravel project with all the bells and whistles
-composer create-project laravel/laravel myapp "11.*" --prefer-dist
+composer create-project laravel/laravel myapp "12.*" --prefer-dist
 cd myapp
 
 # Install development dependencies
@@ -121,7 +121,27 @@ parameters:
 
 ## 1. Architecture & Project Structure
 
-Laravel 11's default structure is good for small projects, but production applications need more organization. Adopt a domain-driven structure with clear boundaries.
+Laravel 12's default structure is good for small projects, but production applications need more organization. Adopt a domain-driven structure with clear boundaries.
+
+### Laravel 12 New Features
+
+Laravel 12, released February 24, 2025, brings minimal breaking changes while introducing powerful new capabilities:
+
+**✅ New Application Starter Kits**
+- React and Vue starters with Inertia 2, TypeScript, shadcn/ui, and Tailwind CSS
+- Livewire starters with Flux UI component library and Laravel Volt
+- WorkOS AuthKit integration for social auth, passkeys, and SSO (free up to 1M MAU)
+
+**✅ Enhanced Dependency Compatibility**
+- UUIDv7 by default with `HasUuids` trait (ordered UUIDs)
+- Carbon 3.x as the default date library
+- Improved concurrency with associative array key preservation
+- Container now respects class property default values
+
+**✅ Performance & Database Improvements**
+- Multi-schema database inspection across all databases
+- Improved query performance with schema-qualified table names
+- Enhanced memory management for high-traffic applications
 
 ### ✅ DO: Use Domain-Driven Design (DDD) Structure
 

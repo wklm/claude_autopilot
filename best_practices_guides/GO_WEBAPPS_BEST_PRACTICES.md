@@ -1,14 +1,14 @@
-# The Definitive Guide to Go Web Development with Fiber/Echo, pgx, and Ent (Mid-2025 Edition)
+# The Definitive Guide to Go Web Development with Fiber/Echo, pgx, and Ent (Late 2025 Edition)
 
 This guide synthesizes modern best practices for building scalable, secure, and performant web applications with Go, focusing on the Fiber/Echo frameworks, pgx PostgreSQL driver, and Ent ORM. It provides production-grade architectural patterns and moves beyond basic tutorials.
 
 ### Prerequisites & Configuration
 
-Ensure your project uses **Go 1.23+** with the new range-over-func iterators, enhanced generic inference, and improved memory management. 
+Ensure your project uses **Go 1.24+** with support for generic type aliases, Swiss Tables map implementation, and improved performance. 
 
 ```bash
 # Check Go version
-go version  # Should show go1.23.x or higher
+go version  # Should show go1.24.x or higher
 
 # Initialize module with modern Go
 go mod init github.com/yourorg/yourapp
@@ -19,9 +19,9 @@ Create a modern `go.mod` with proper toolchain directives:
 ```go
 module github.com/yourorg/yourapp
 
-go 1.23
+go 1.24
 
-toolchain go1.23.0
+toolchain go1.24.0
 
 require (
     github.com/gofiber/fiber/v3 v3.0.0-beta.3
@@ -32,7 +32,7 @@ require (
 )
 ```
 
-> **Note**: Go 1.23 introduces `toolchain` directive for reproducible builds and forward compatibility.
+> **Note**: Go 1.24 introduces full support for generic type aliases, Swiss Tables-based map implementation (2-3% performance improvement), and `go:wasmexport` directive for WebAssembly.
 
 ### Development Tools Configuration
 
@@ -68,7 +68,7 @@ bench:
 # .golangci.yml
 run:
   timeout: 5m
-  go: "1.23"
+  go: "1.24"
 
 linters:
   enable-all: true

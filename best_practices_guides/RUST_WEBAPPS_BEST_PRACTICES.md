@@ -1,10 +1,10 @@
-# The Definitive Guide to High-Performance Rust Web APIs with Axum, SeaORM, and PostgreSQL (mid-2025 Edition)
+# The Definitive Guide to High-Performance Rust Web APIs with Axum, SeaORM, and PostgreSQL (Late 2025 Edition)
 
 This guide synthesizes battle-tested patterns for building production-grade, high-performance web APIs in Rust. It leverages the ecosystem's most mature libraries while avoiding common pitfalls that plague Rust web services at scale.
 
 ## Prerequisites & Core Dependencies
 
-Your project should target **Rust 1.82+** (stable channel), using **Axum 0.8+**, **SeaORM 1.2+**, and **PostgreSQL 16+**. The async runtime is **Tokio 1.44+** with all features enabled.
+Your project should target **Rust 1.85+** (stable channel with Rust 2024 edition), using **Axum 0.8+**, **SeaORM 1.2+**, and **PostgreSQL 16+**. The async runtime is **Tokio 1.45+** with all features enabled.
 
 ### Base `Cargo.toml` Configuration
 
@@ -12,8 +12,8 @@ Your project should target **Rust 1.82+** (stable channel), using **Axum 0.8+**,
 [package]
 name = "api-service"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.82"
+edition = "2024"
+rust-version = "1.85"
 
 [dependencies]
 # Web Framework
@@ -25,7 +25,7 @@ hyper = { version = "1.5", features = ["full"] }
 hyper-util = "0.1"
 
 # Async Runtime
-tokio = { version = "1.44", features = ["full"] }
+tokio = { version = "1.45", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 
 # Database
@@ -122,15 +122,15 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.82"
+edition = "2024"
+rust-version = "1.85"
 authors = ["Your Team <team@example.com>"]
 
 [workspace.dependencies]
 # Define versions once, use everywhere
 axum = "0.8"
 sea-orm = "1.2"
-tokio = { version = "1.44", features = ["full"] }
+tokio = { version = "1.45", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 ```
 
