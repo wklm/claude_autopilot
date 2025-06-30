@@ -1,0 +1,25 @@
+First I need you to CAREFULLY review the guide in best_practices_guides/BASH_AND_ZSH_SCRIPTING_FOR_UBUNTU.md. Then I want you to begin the process of systematically revising the shell scripts in this project to conform to this guide.
+
+Create a new document called BASH_ZSH_BEST_PRACTICES_IMPLEMENTATION_PROGRESS.md where you keep track of what you've done and what remains to be done. This document should:
+- List each major section and guideline from the best practices guide
+- Track the implementation status of each guideline (0%, 25%, 50%, 75%, 100%)
+- Include specific notes about what was changed and what scripts were affected
+- Note which scripts are Bash vs Zsh and handle them appropriately
+- Be ACTUALLY accurate and not exaggerate or mislead about completion status
+
+You don't need to try to do everything in the guide all at once. Work on approximately {chunk_size} changes or improvements at a time, focusing on one or two related guidelines such as:
+- Error handling patterns (set -euo pipefail, trap handlers)
+- Modern script architecture and modularization
+- Input validation and argument parsing
+- Security practices and safe command execution
+- Performance optimizations and parallel processing
+
+IMPORTANT:
+- Test scripts after modifications to ensure they still work correctly
+- Use ShellCheck to validate changes and fix any issues
+- Maintain backward compatibility where appropriate
+- Update shebang lines to use the recommended patterns
+- Consider the impact on both interactive and non-interactive scripts
+- Add proper documentation and usage functions
+
+When you're done with this batch of improvements, commit your progress to git with a detailed commit message explaining what best practices were implemented. 

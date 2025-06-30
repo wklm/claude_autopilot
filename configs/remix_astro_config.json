@@ -1,0 +1,31 @@
+{
+  "comment": "Configuration for implementing Remix and Astro content site best practices",
+  "tech_stack": "remix-astro",
+  "problem_commands": {
+    "type_check": ["npm", "run", "type-check"],
+    "lint": ["npm", "run", "lint"]
+  },
+  "best_practices_files": ["./best_practices_guides/REMIX_ASTRO_BEST_PRACTICES.md"],
+  "chunk_size": 35,
+  "agents": 10,
+  "session": "claude_remix_astro_best_practices",
+  "stagger": 15.0,
+  "wait_after_cc": 20.0,
+  "check_interval": 15,
+  "skip_regenerate": false,
+  "skip_commit": false,
+  "auto_restart": true,
+  "no_monitor": false,
+  "attach": false,
+  "prompt_file": "prompts/default_best_practices_prompt_remix_astro.txt",
+  "context_threshold": 18,
+  "idle_timeout": 120,
+  "max_errors": 3,
+  "git_branch": "main",
+  "git_remote": "origin",
+  "tmux_kill_on_exit": true,
+  "tmux_mouse": true,
+  "fast_start": false,
+  "full_backup": false,
+  "max_agents": 20
+} 

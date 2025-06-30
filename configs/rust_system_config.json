@@ -1,0 +1,31 @@
+{
+  "comment": "Configuration for implementing Rust system programming best practices",
+  "tech_stack": "rust-system",
+  "problem_commands": {
+    "type_check": ["cargo", "check", "--all-targets"],
+    "lint": ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+  },
+  "best_practices_files": ["./best_practices_guides/RUST_SYSTEM_PROGRAMMING_BEST_PRACTICES.md"],
+  "chunk_size": 20,
+  "agents": 8,
+  "session": "claude_rust_system_best_practices",
+  "stagger": 25.0,
+  "wait_after_cc": 30.0,
+  "check_interval": 20,
+  "skip_regenerate": false,
+  "skip_commit": false,
+  "auto_restart": true,
+  "no_monitor": false,
+  "attach": false,
+  "prompt_file": "prompts/default_best_practices_prompt_rust_system.txt",
+  "context_threshold": 25,
+  "idle_timeout": 180,
+  "max_errors": 5,
+  "git_branch": "main",
+  "git_remote": "origin",
+  "tmux_kill_on_exit": true,
+  "tmux_mouse": true,
+  "fast_start": false,
+  "full_backup": false,
+  "max_agents": 15
+} 

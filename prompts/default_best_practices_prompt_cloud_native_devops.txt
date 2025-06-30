@@ -1,0 +1,21 @@
+First I need you to CAREFULLY review the guide in best_practices_guides/CLOUD_NATIVE_DEVOPS_BEST_PRACTICES.md. Then I want you to begin the process of systematically revising the code in this project to conform to this guide.
+
+Create a new document called CLOUD_NATIVE_DEVOPS_BEST_PRACTICES_IMPLEMENTATION_PROGRESS.md where you keep track of what you've done and what remains to be done. This document should:
+- List each major section and guideline from the best practices guide
+- Track the implementation status of each guideline (0%, 25%, 50%, 75%, 100%)
+- Include specific notes about what was changed and what files were affected
+- Be ACTUALLY accurate and not exaggerate or mislead about completion status
+
+You don't need to try to do everything in the guide all at once. Work on approximately {chunk_size} changes or improvements at a time, focusing on one or two related guidelines. Keep close track of what has been done already and what remains to be done at a granular level so we can eventually have confidence that the entire guide has been fully and completely implemented.
+
+IMPORTANT: 
+- Implement proper GitOps patterns with Argo CD or Flux
+- Use Gateway API instead of traditional Ingress where applicable
+- Set up proper resource quotas and limits for all namespaces
+- Implement Infrastructure as Code with Terraform/OpenTofu or Crossplane
+- Configure comprehensive observability with OpenTelemetry
+- Update the progress document after each set of changes
+- Be honest about partial implementations - if you only updated a few manifests, say so
+- Follow Kubernetes best practices for security and multi-tenancy
+
+When you're done with this batch of improvements, commit your progress to git with a detailed commit message explaining what best practices were implemented. 

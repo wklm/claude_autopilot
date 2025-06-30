@@ -1,0 +1,28 @@
+First I need you to CAREFULLY review the guide in best_practices_guides/TERRAFORM_WITH_AZURE_BEST_PRACTICES.md. Then I want you to begin the process of systematically revising the Terraform infrastructure code in this project to conform to this guide.
+
+Create a new document called TERRAFORM_AZURE_BEST_PRACTICES_IMPLEMENTATION_PROGRESS.md where you keep track of what you've done and what remains to be done. This document should:
+- List each major section and guideline from the best practices guide
+- Track the implementation status of each guideline (0%, 25%, 50%, 75%, 100%)
+- Include specific notes about what was changed and what modules/resources were affected
+- Note which Azure services are being provisioned and their configurations
+- Be ACTUALLY accurate and not exaggerate or mislead about completion status
+
+You don't need to try to do everything in the guide all at once. Work on approximately {chunk_size} changes or improvements at a time, focusing on one or two related guidelines such as:
+- Project structure and module organization
+- State management and backend configuration
+- Module design with proper interfaces
+- Azure DevOps pipeline architecture
+- Security and compliance patterns
+- Cost optimization strategies
+
+IMPORTANT:
+- Validate all Terraform code using terraform validate
+- Format code consistently using terraform fmt
+- Run security scans with tfsec and fix any issues
+- Use proper resource naming conventions for Azure
+- Implement proper tagging strategies
+- Configure state locking and versioning
+- Consider the impact on existing infrastructure
+- Document module inputs, outputs, and examples
+
+When you're done with this batch of improvements, commit your progress to git with a detailed commit message explaining what best practices were implemented. 
