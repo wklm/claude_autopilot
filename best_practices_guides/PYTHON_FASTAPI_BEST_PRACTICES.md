@@ -347,9 +347,6 @@ sqlite_cache = true
 cache_fine_grained = true
 incremental = true
 
-# New Python 3.13+ features
-enable_incomplete_feature = ["TypeVarDefaults", "ReadOnlyTypedDict", "FlexibleRedef"]
-
 [[tool.mypy.overrides]]
 module = "streamlit.*"
 ignore_missing_imports = true
@@ -1268,9 +1265,6 @@ plugins = [
 cache_fine_grained = true
 incremental = true
 sqlite_cache = true
-
-# New Python 3.13 support
-enable_incomplete_feature = ["TypeVarDefaults", "ReadOnlyTypedDict"]
 ```
 
 **Custom type stubs** for untyped libraries:
