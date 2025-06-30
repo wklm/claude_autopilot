@@ -3,7 +3,7 @@
 This guide synthesizes modern best practices for building performant, secure, and maintainable cross-platform mobile applications with React Native's Fabric architecture. It moves beyond basic tutorials to provide production-grade architectural patterns for apps that truly feel native.
 
 ### Prerequisites & Configuration
-Ensure your project uses **React Native 0.76+**, **React 19.1+**, **TypeScript 5.6+**, and **Node.js 22+**. The Fabric architecture is now stable and should be the default for all new projects.
+Ensure your project uses **React Native 0.80+**, **React 19.1+**, **TypeScript 5.8+**, and **Node.js 22+**. The Fabric architecture is now stable and should be the default for all new projects.
 
 Initialize with the latest template and enable modern features:
 
@@ -38,6 +38,45 @@ module.exports = {
     concurrentRoot: true, // React 19 concurrent features
   },
 };
+```
+
+### React Native 0.80+ Enhancements
+
+React Native 0.80 brings significant improvements that enhance both developer experience and app performance:
+
+**JavaScript Deep Imports Deprecated**: Direct imports from subpaths are now formally deprecated. Update your imports:
+```typescript
+// ❌ Old way - Deep import
+import {Alert} from 'react-native/Libraries/Alert/Alert';
+
+// ✅ New way - Root import
+import {Alert} from 'react-native';
+```
+
+**Strict TypeScript API**: A new opt-in TypeScript API provides better type safety and is generated directly from source code:
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "types": ["react-native/types/strict"]
+  }
+}
+```
+
+**Improved Metro Performance**: Metro 0.82 delivers up to 3x faster cold starts with deferred hashing, especially beneficial for large projects and monorepos.
+
+**Android Startup Optimization**: Uncompressed JavaScript bundles reduce time-to-interactive by up to 400ms (12% improvement) on mid-range devices. This is enabled by default but can be configured:
+```gradle
+// app/build.gradle
+react {
+  enableBundleCompression = false // Default: faster startup, larger storage
+}
+```
+
+**iOS Prebuilt Dependencies**: Experimental support for prebuilt React Native dependencies reduces initial iOS build times by ~12%:
+```bash
+# Enable prebuilt dependencies
+RCT_USE_RN_DEP=1 bundle exec pod install
 ```
 
 ---

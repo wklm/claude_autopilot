@@ -1,12 +1,12 @@
-# The Definitive Guide to SvelteKit 2.8, Bun, and Modern State Management (mid-2025)
+# The Definitive Guide to SvelteKit 2.21, Bun, and Modern State Management (mid-2025)
 
-This guide synthesizes modern best practices for building scalable, secure, and performant applications with SvelteKit 2.8, Bun runtime, and contemporary state management patterns. It provides a production-grade architectural blueprint that leverages Svelte's unique compilation advantages and Bun's blazing-fast runtime.
+This guide synthesizes modern best practices for building scalable, secure, and performant applications with SvelteKit 2.21, Bun runtime, and contemporary state management patterns. It provides a production-grade architectural blueprint that leverages Svelte's unique compilation advantages and Bun's blazing-fast runtime.
 
 ### Prerequisites & Configuration
 
-Ensure your project uses **SvelteKit 2.8+**, **Svelte 5.5+**, **Bun 1.2+**, and **TypeScript 5.6+**.
+Ensure your project uses **SvelteKit 2.21+**, **Svelte 5.33+**, **Bun 1.2+**, and **TypeScript 5.8+**.
 
-SvelteKit 2.8 supports Bun as a first-class runtime. Configure modern features in your `svelte.config.js`:
+SvelteKit 2.21 supports Bun as a first-class runtime. Configure modern features in your `svelte.config.js`:
 
 ```javascript
 // svelte.config.js
@@ -24,9 +24,8 @@ const config = {
       dynamic_origin: true,
     }),
     
-    // SvelteKit 2.8 features
+    // SvelteKit 2.21 features
     experimental: {
-      runes: true,              // Svelte 5 runes (stable as of 5.0)
       modulePreload: 'smart',   // Intelligent preloading
       hmr: {
         preserveLocalState: true,
@@ -65,6 +64,26 @@ export default config;
 ```
 
 > **Note**: Bun's native TypeScript support means you can use `svelte.config.ts` directly without transpilation.
+
+### What's New in Svelte 5.33+ and SvelteKit 2.21+
+
+**Svelte 5.33 Features:**
+- **Attachments**: A more flexible replacement for actions with better composition
+- **Generic Snippets**: Type-safe snippets with generics support
+- **Improved Class Support**: State fields can be declared inside class constructors
+- **XHTML Compliance**: New `fragments` option for better CSP compliance
+- **Enhanced `class` Attribute**: Now accepts objects and arrays using `clsx` syntax
+
+**SvelteKit 2.21 Features:**
+- **Transport Hook**: Encode/decode custom non-POJOs across server/client boundary
+- **Bundle Strategy**: Choose between 'split', 'single', and 'inline' output options
+- **Top-level Client Code**: Allowed in universal pages when SSR is disabled
+- **$app/state Module**: Replaces `$app/stores` with Svelte 5 state primitives
+
+**TypeScript 5.8+ Integration:**
+- Full support for granular type checking with conditional returns
+- Direct TypeScript execution with Node.js experimental flags
+- Enhanced inference for complex generic patterns
 
 ---
 
