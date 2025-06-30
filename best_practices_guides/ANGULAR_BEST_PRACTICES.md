@@ -1,10 +1,10 @@
-# The Definitive Guide to Angular 19, Signals, and Modern Web Development (2025)
+# The Definitive Guide to Angular 20, Signals, and Modern Web Development (2025)
 
-This guide synthesizes modern best practices for building scalable, performant, and maintainable applications with Angular 19, the new Signals-based reactivity system, and contemporary tooling. It provides a production-grade architectural blueprint for teams building enterprise Angular applications in 2025.
+This guide synthesizes modern best practices for building scalable, performant, and maintainable applications with Angular 20, the stable Signals-based reactivity system, and contemporary tooling. It provides a production-grade architectural blueprint for teams building enterprise Angular applications in 2025.
 
 ### Prerequisites & Configuration
 
-Ensure your project uses **Angular 19.0+**, **TypeScript 5.6+**, and **Node.js 22+ LTS**. This guide assumes you're using the new **Vite-powered dev server** (default since Angular 18) and **esbuild** for production builds.
+Ensure your project uses **Angular 20.0+**, **TypeScript 5.8+**, and **Node.js 20.19+ LTS, 22.12+ LTS, or 24+**. This guide assumes you're using the new **Vite-powered dev server** (default since Angular 18) and **esbuild** for production builds.
 
 Initialize your project with the Angular CLI's modern defaults:
 
@@ -85,7 +85,7 @@ Configure your `angular.json` for modern development:
 }
 ```
 
-TypeScript configuration optimized for Angular 19:
+TypeScript configuration optimized for Angular 20:
 
 ```typescript
 // tsconfig.json
@@ -138,7 +138,7 @@ TypeScript configuration optimized for Angular 19:
 
 ## 1. Foundational Architecture & Project Structure
 
-Angular 19 emphasizes **standalone components** and **feature-based architecture**. The traditional NgModule-based approach is now considered legacy.
+Angular 20 emphasizes **standalone components** and **feature-based architecture**. The traditional NgModule-based approach is now considered legacy.
 
 ### ✅ DO: Use Feature-Based Architecture with Standalone Components
 
@@ -204,7 +204,7 @@ bootstrapApplication(AppComponent, appConfig)
 // app.config.ts - Centralized configuration
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter, withComponentInputBinding, withViewTransitions } from '@angular/router';
-import { provideClientHydration, withEventReplay } from '@angular/platform-browser';
+import { provideClientHydration, withEventReplay, withIncrementalHydration } from '@angular/platform-browser';
 import { provideHttpClient, withInterceptors, withFetch } from '@angular/common/http';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 
@@ -232,17 +232,20 @@ export const appConfig: ApplicationConfig = {
     // Async animations for better performance
     provideAnimationsAsync(),
     
-    // SSR hydration with event replay
-    provideClientHydration(withEventReplay())
+    // SSR hydration with event replay and incremental hydration (new in v20)
+    provideClientHydration(
+      withEventReplay(),
+      withIncrementalHydration()  // New: hydrate only interactive parts
+    )
   ]
 };
 ```
 
 ---
 
-## 2. Signals: The New Reactivity Paradigm
+## 2. Signals: The Stable Reactivity Paradigm
 
-Angular 19's **Signals** provide fine-grained reactivity, eliminating many Zone.js performance issues and enabling better tree-shaking.
+Angular 20's **Signals** are now fully stable, providing fine-grained reactivity, eliminating many Zone.js performance issues and enabling better tree-shaking.
 
 ### ✅ DO: Use Signals for Reactive State
 
@@ -312,12 +315,14 @@ export class DashboardComponent {
 }
 ```
 
-### ✅ DO: Use Signal-Based Forms (Angular 19)
+### ✅ DO: Use Signal-Based Forms (Angular 20 - Beta)
 
 ```typescript
 // product-form.component.ts
 import { Component, signal, computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+// Note: Signal-based forms API in beta
+import { formSignal, signalFormControl } from '@angular/forms/experimental';
 
 interface ProductForm {
   name: string;
@@ -400,29 +405,38 @@ export class ProductFormComponent {
 }
 ```
 
-### ❌ DON'T: Mix Signals and RxJS Unnecessarily
-
-While `toSignal()` and `toObservable()` exist for interop, avoid unnecessary conversions:
+### ✅ DO: Use linkedSignal for Dependent State (Stable in v20)
 
 ```typescript
-// Bad - Converting back and forth
-const searchTerm = signal('');
-const searchTerm$ = toObservable(searchTerm);
-const searchSignal = toSignal(searchTerm$);
+// dashboard.component.ts
+import { Component, signal, computed, linkedSignal } from '@angular/core';
 
-// Good - Pick one approach
-const searchTerm = signal(''); // Use signals throughout
-// OR
-const searchTerm$ = new BehaviorSubject(''); // Use RxJS throughout
+@Component({
+  selector: 'app-dashboard',
+  standalone: true,
+  template: `...`
+})
+export class DashboardComponent {
+  selectedCategory = signal<string>('all');
+  
+  // linkedSignal automatically updates when selectedCategory changes
+  filteredProducts = linkedSignal({
+    source: this.selectedCategory,
+    computation: (category) => {
+      if (category === 'all') return this.allProducts();
+      return this.allProducts().filter(p => p.category === category);
+    }
+  });
+}
 ```
 
 ---
 
 ## 3. Modern Control Flow and Template Syntax
 
-Angular 19 introduces new built-in control flow that's more performant than structural directives.
+Angular 20 enhances the built-in control flow with additional features and performance optimizations.
 
-### ✅ DO: Use Built-in Control Flow
+### ✅ DO: Use Built-in Control Flow with New Features
 
 ```typescript
 @Component({
@@ -436,13 +450,18 @@ Angular 19 introduces new built-in control flow that's more performant than stru
       <p>Please log in</p>
     }
     
-    <!-- Loops with mandatory track -->
+    <!-- Loops with mandatory track and new 'in' operator -->
     @for (item of items(); track item.id; let i = $index, let isEven = $even) {
       <div [class.even]="isEven">
         {{ i + 1 }}. {{ item.name }}
       </div>
     } @empty {
       <p>No items found</p>
+    }
+    
+    <!-- New: 'in' operator for object iteration -->
+    @for (key in config(); track key) {
+      <p>{{ key }}: {{ config()[key] }}</p>
     }
     
     <!-- Switch statements -->
@@ -458,8 +477,8 @@ Angular 19 introduces new built-in control flow that's more performant than stru
       }
     }
     
-    <!-- Defer loading for performance -->
-    @defer (on viewport; prefetch on idle) {
+    <!-- Defer loading with incremental hydration support -->
+    @defer (on viewport; prefetch on idle; hydrate on interaction) {
       <app-heavy-component />
     } @placeholder (minimum 100ms) {
       <app-skeleton-loader />
@@ -506,7 +525,7 @@ export const routes: Routes = [
 
 ## 4. State Management with Signal Store
 
-Angular 19 works best with **NgRx Signal Store** or similar signal-based state management.
+Angular 20 works best with **NgRx Signal Store** or similar signal-based state management.
 
 ### ✅ DO: Use Signal Store for Complex State
 

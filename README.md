@@ -12,16 +12,16 @@ Claude Code Agent Farm is a powerful orchestration framework that runs multiple 
 
 ### Key Features
 
-- 🚀 **Parallel Processing**: Run 20+ Claude Code agents simultaneously
+- 🚀 **Parallel Processing**: Run 20+ Claude Code agents simultaneously (up to 50 with `max_agents` config)
 - 🎯 **Multiple Workflows**: Bug fixing or best practices implementation
-- 🌐 **Multi-Stack Support**: Next.js, Python, Rust, Go, Java, and 10+ more stacks
+- 🌐 **Multi-Stack Support**: 29 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
 - 📊 **Smart Monitoring**: Real-time dashboard showing agent status and progress
 - 🔄 **Auto-Recovery**: Automatically restarts agents when needed
 - 📈 **Progress Tracking**: Git commits and structured progress documents
 - ⚙️ **Highly Configurable**: JSON configs with variable substitution
 - 🖥️ **Flexible Viewing**: Multiple tmux viewing modes
 - 🔒 **Safe Operation**: Automatic settings backup/restore, file locking, atomic operations
-- 🛠️ **Development Setup**: Integrated tool installation scripts for complete environments
+- 🛠️ **Development Setup**: 13 integrated tool installation scripts for complete environments
 
 ## 📋 Prerequisites
 
@@ -129,6 +129,12 @@ Or run specific setups directly:
 11. **Serverless Edge** (`setup_serverless_edge.sh`)
     - Serverless and edge computing tools
 
+12. **Angular** (`setup_angular.sh`)
+    - Node.js, Angular CLI, TypeScript, testing tools
+
+13. **Flutter** (`setup_flutter.sh`)
+    - Flutter SDK, Dart, Android Studio, development tools
+
 ### Setup Features
 
 - 🎨 **Interactive & Safe**: Colorful prompts, always asks before installing
@@ -215,28 +221,53 @@ Agents systematically implement modern best practices:
 
 ## 🌐 Technology Stack Support
 
-### Built-in Configurations
+### Complete List of 29 Supported Tech Stacks
 
 The project includes pre-configured support for:
 
+#### Web Development
 1. **Next.js** - TypeScript, React, modern web development
-2. **Python** - FastAPI, Django, data science workflows
-3. **Rust** - System programming and web applications
-4. **Go** - Web services and cloud-native applications
-5. **Java** - Enterprise applications with Spring Boot
-6. **SvelteKit** - Modern web framework
-7. **Remix/Astro** - Full-stack web frameworks
-8. **Bash/Zsh** - Shell scripting and automation
-9. **Terraform/Azure** - Infrastructure as Code
-10. **Cloud Native DevOps** - Kubernetes, Docker, CI/CD
-11. **GenAI/LLM Ops** - AI/ML operations and tooling
-12. **Data Engineering** - ETL, analytics, big data
-13. **Serverless Edge** - Edge computing and serverless
+2. **Angular** - Enterprise Angular applications
+3. **SvelteKit** - Modern web framework
+4. **Remix/Astro** - Full-stack web frameworks
+5. **Flutter** - Cross-platform mobile development
+6. **Laravel** - PHP web framework
+7. **PHP** - General PHP development
+
+#### Systems & Languages
+8. **Python** - FastAPI, Django, data science workflows
+9. **Rust** - System programming and web applications
+10. **Rust CLI** - Command-line tool development
+11. **Go** - Web services and cloud-native applications
+12. **Java** - Enterprise applications with Spring Boot
+13. **C++** - Systems programming and performance-critical applications
+
+#### DevOps & Infrastructure
+14. **Bash/Zsh** - Shell scripting and automation
+15. **Terraform/Azure** - Infrastructure as Code
+16. **Cloud Native DevOps** - Kubernetes, Docker, CI/CD
+17. **Ansible** - Infrastructure automation and configuration management
+18. **HashiCorp Vault** - Secrets management and policy as code
+
+#### Data & AI
+19. **GenAI/LLM Ops** - AI/ML operations and tooling
+20. **Data Engineering** - ETL, analytics, big data
+21. **Data Lakes** - Kafka, Snowflake, Spark integration
+22. **Polars/DuckDB** - High-performance data processing
+23. **Excel Automation** - Python-based Excel automation with Azure
+
+#### Specialized Domains
+24. **Serverless Edge** - Edge computing and serverless
+25. **Security Engineering** - Security best practices and tooling
+26. **Hardware Development** - Embedded systems and hardware design
+27. **Unreal Engine** - Game development with Unreal Engine 5
+28. **Solana/Anchor** - Blockchain development on Solana
+29. **Cosmos** - Cosmos blockchain ecosystem
 
 Each stack includes:
 - Optimized configuration file
 - Technology-specific prompts
-- Comprehensive best practices guide
+- Comprehensive best practices guide (30 guides total)
 - Appropriate chunk sizes and timing
 
 ### Custom Tech Stacks
@@ -255,6 +286,7 @@ Create your own configuration:
   "chunk_size": 30,
   "prompt_file": "prompts/rust_prompt.txt",
   "agents": 15,
+  "max_agents": 50,
   "auto_restart": true,
   "git_branch": "feature/rust-improvements",
   "git_remote": "origin"
@@ -271,11 +303,13 @@ Create your own configuration:
   "tech_stack": "nextjs",
   "problem_commands": {
     "type_check": ["bun", "run", "type-check"],
-    "lint": ["bun", "run", "lint"]
+    "lint": ["bun", "run", "lint"],
+    "test": ["bun", "run", "test"]
   },
   "best_practices_files": ["./best_practices_guides/NEXTJS15_BEST_PRACTICES.md"],
   "chunk_size": 50,
   "agents": 20,
+  "max_agents": 50,
   "session": "claude_agents",
   "prompt_file": "prompts/default_prompt_nextjs.txt",
   "auto_restart": true,
@@ -285,17 +319,28 @@ Create your own configuration:
   "git_branch": null,
   "git_remote": "origin",
   "tmux_kill_on_exit": true,
-  "tmux_mouse": true
+  "tmux_mouse": true,
+  "stagger": 10.0,
+  "wait_after_cc": 15.0,
+  "check_interval": 10,
+  "skip_regenerate": false,
+  "skip_commit": false,
+  "no_monitor": false,
+  "attach": false,
+  "fast_start": false,
+  "full_backup": false
 }
 ```
 
 ### Key Parameters
 
-- **tech_stack**: Technology identifier (nextjs, python, rust, etc.)
-- **problem_commands**: Commands for type-checking and linting
+- **tech_stack**: Technology identifier (one of 29 supported stacks)
+- **problem_commands**: Commands for type-checking, linting, and testing
 - **best_practices_files**: Guides to copy to the project
 - **chunk_size**: How many lines/changes per agent iteration (varies by stack: 20-75)
-- **prompt_file**: Which prompt template to use
+- **prompt_file**: Which prompt template to use (36 available)
+- **agents**: Number of agents to run (default: 20)
+- **max_agents**: Maximum allowed agents (default: 50)
 - **auto_restart**: Enable automatic agent restart
 - **context_threshold**: Restart when context drops below this %
 - **git_branch**: Optional specific branch to commit to
@@ -353,33 +398,59 @@ Advanced:
 
 ## 📝 Prompt System
 
-### Prompt Types
+### Complete Prompt Inventory (36 Prompts)
 
-The system includes 20+ specialized prompts:
+The system includes specialized prompts for all workflows and tech stacks:
 
-#### Bug Fixing Prompts
+#### Bug Fixing Prompts (4)
 - `default_prompt.txt` - Generic bug fixing
 - `default_prompt_nextjs.txt` - Next.js specific
 - `default_prompt_python.txt` - Python specific
 - `bug_fixing_prompt_for_nextjs.txt` - Advanced Next.js fixing
 
-#### Best Practices Prompts
+#### Best Practices Implementation Prompts (31)
 - `default_best_practices_prompt.txt` - Generic implementation
+- `continue_best_practices_prompt.txt` - Continue existing work
+
+##### Web Development (7)
 - `default_best_practices_prompt_nextjs.txt` - Next.js 15
+- `default_best_practices_prompt_angular.txt` - Angular
+- `default_best_practices_prompt_sveltekit.txt` - SvelteKit
+- `default_best_practices_prompt_remix_astro.txt` - Remix/Astro
+- `default_best_practices_prompt_flutter.txt` - Flutter
+- `default_best_practices_prompt_laravel.txt` - Laravel
+- `default_best_practices_prompt_php.txt` - PHP
+
+##### Systems & Languages (7)
 - `default_best_practices_prompt_python.txt` - Python/FastAPI
 - `default_best_practices_prompt_rust_web.txt` - Rust web apps
 - `default_best_practices_prompt_rust_system.txt` - Rust systems
+- `default_best_practices_prompt_rust_cli.txt` - Rust CLI tools
 - `default_best_practices_prompt_go.txt` - Go applications
 - `default_best_practices_prompt_java.txt` - Java enterprise
-- `default_best_practices_prompt_sveltekit.txt` - SvelteKit
-- `default_best_practices_prompt_remix_astro.txt` - Remix/Astro
+- `default_best_practices_prompt_cpp.txt` - C++ systems
+
+##### DevOps & Infrastructure (5)
 - `default_best_practices_prompt_bash_zsh.txt` - Shell scripting
 - `default_best_practices_prompt_terraform_azure.txt` - IaC
 - `default_best_practices_prompt_cloud_native_devops.txt` - DevOps
+- `default_best_practices_prompt_ansible.txt` - Ansible automation
+- `default_best_practices_prompt_vault.txt` - HashiCorp Vault
+
+##### Data & AI (5)
 - `default_best_practices_prompt_genai_llm_ops.txt` - AI/ML ops
 - `default_best_practices_prompt_data_engineering.txt` - Data pipelines
+- `default_best_practices_prompt_data_lakes.txt` - Data lakes
+- `default_best_practices_prompt_polars.txt` - Polars/DuckDB
+- `default_best_practices_prompt_excel.txt` - Excel automation
+
+##### Specialized (5)
 - `default_best_practices_prompt_serverless_edge.txt` - Edge computing
-- `continue_best_practices_prompt.txt` - Continue existing work
+- `default_best_practices_prompt_security.txt` - Security engineering
+- `default_best_practices_prompt_hardware.txt` - Hardware development
+- `default_best_practices_prompt_unreal.txt` - Unreal Engine
+- `default_best_practices_prompt_solana.txt` - Solana blockchain
+- `default_best_practices_prompt_cosmos.txt` - Cosmos blockchain
 
 ### Variable Substitution
 
@@ -395,7 +466,7 @@ Work on approximately {chunk_size} improvements at a time...
 
 ### Bug Fixing Workflow
 
-1. **Problem Generation**: Runs type-check and lint commands
+1. **Problem Generation**: Runs type-check, lint, and test commands
 2. **Agent Launch**: Starts N agents in tmux panes
 3. **Task Distribution**: Each agent selects random problem chunks
 4. **Conflict Prevention**: Marks completed problems with [COMPLETED]
@@ -418,6 +489,7 @@ Work on approximately {chunk_size} improvements at a time...
 5. **Emergency Cleanup**: Handles unexpected exits gracefully
 6. **Launch Locking**: Prevents concurrent Claude launches with lock files
 7. **Dynamic Stagger**: Adjusts launch delays based on error detection
+8. **Agent Limits**: Enforces max_agents limit (default: 50)
 
 ## 📊 Monitoring Dashboard
 
@@ -522,6 +594,24 @@ claude-code-agent-farm \
   --auto-restart
 ```
 
+### Specialized Stacks
+```bash
+# Angular development
+claude-code-agent-farm \
+  --path /angular/project \
+  --config configs/angular_config.json
+
+# Blockchain development
+claude-code-agent-farm \
+  --path /solana/project \
+  --config configs/solana_anchor_config.json
+
+# Data engineering
+claude-code-agent-farm \
+  --path /data/project \
+  --config configs/polars_duckdb_config.json
+```
+
 ## 🚨 Troubleshooting
 
 ### Common Issues
@@ -544,6 +634,7 @@ claude-code-agent-farm \
 - Reduce agent count if needed
 - Monitor with `htop`
 - Check available disk space for logs
+- Respect max_agents limit (default: 50)
 
 #### Settings corruption
 - System automatically backs up settings
@@ -563,81 +654,83 @@ claude-code-agent-farm \
 
 ```
 claude_code_agent_farm/
-├── claude_code_agent_farm.py    # Main orchestrator
+├── claude_code_agent_farm.py    # Main orchestrator (1887 lines)
 ├── view_agents.sh               # Tmux viewer utility
 ├── setup.sh                     # Automated setup
-├── configs/                     # Configuration files
+├── pyproject.toml              # Python project configuration
+├── uv.lock                     # Locked dependencies
+├── .envrc                      # direnv configuration
+├── .gitignore                  # Git ignore patterns
+├── configs/                     # 33 configuration files
 │   ├── nextjs_config.json      # Next.js bug fixing
 │   ├── python_config.json      # Python bug fixing
 │   ├── python_uv_config.json   # Python with uv
 │   ├── nextjs_best_practices_config.json
+│   ├── angular_config.json     # Angular development
+│   ├── flutter_config.json     # Flutter mobile
 │   ├── rust_system_config.json # Rust systems programming
 │   ├── rust_webapps_config.json # Rust web apps
+│   ├── rust_cli_config.json    # Rust CLI tools
 │   ├── go_webapps_config.json  # Go web development
 │   ├── java_enterprise_config.json # Java enterprise
+│   ├── cpp_systems_config.json # C++ systems
+│   ├── php_config.json         # PHP development
+│   ├── laravel_config.json     # Laravel framework
 │   ├── sveltekit2_config.json  # SvelteKit framework
 │   ├── remix_astro_config.json # Remix/Astro frameworks
 │   ├── bash_zsh_config.json    # Shell scripting
 │   ├── terraform_azure_config.json # Infrastructure as Code
 │   ├── cloud_native_devops_config.json # DevOps tools
+│   ├── ansible_config.json     # Ansible automation
+│   ├── vault_config.json       # HashiCorp Vault
 │   ├── genai_llm_ops_config.json # AI/ML operations
 │   ├── data_engineering_config.json # Data pipelines
+│   ├── data_lakes_config.json  # Kafka/Snowflake/Spark
+│   ├── polars_duckdb_config.json # Data processing
+│   ├── excel_automation_config.json # Excel automation
 │   ├── serverless_edge_config.json # Edge computing
+│   ├── security_engineering_config.json # Security
+│   ├── hardware_dev_config.json # Hardware development
+│   ├── unreal_engine_config.json # Game development
+│   ├── solana_anchor_config.json # Solana blockchain
+│   ├── cosmos_blockchain_config.json # Cosmos blockchain
 │   └── sample.json             # Example configuration
-├── prompts/                     # Prompt templates
-│   ├── default_prompt_*.txt    # Bug fixing prompts
-│   ├── default_best_practices_*.txt # Best practices prompts
-│   └── continue_best_practices_prompt.txt
-├── best_practices_guides/       # Best practices documents
-│   ├── NEXTJS15_BEST_PRACTICES.md
-│   ├── PYTHON_FASTAPI_BEST_PRACTICES.md
-│   ├── RUST_SYSTEM_PROGRAMMING_BEST_PRACTICES.md
-│   ├── RUST_WEBAPPS_BEST_PRACTICES.md
-│   ├── GO_WEBAPPS_BEST_PRACTICES.md
-│   ├── JAVA_ENTERPRISE_BEST_PRACTICES.md
-│   ├── SVELTEKIT2_BEST_PRACTICES.md
-│   ├── REMIX_ASTRO_BEST_PRACTICES.md
-│   ├── BASH_AND_ZSH_SCRIPTING_FOR_UBUNTU.md
-│   ├── TERRAFORM_WITH_AZURE_BEST_PRACTICES.md
-│   ├── CLOUD_NATIVE_DEVOPS_BEST_PRACTICES.md
-│   ├── GENAI_LLM_OPS_BEST_PRACTICES.md
-│   ├── DATA_ENGINEERING_AND_ANALYTICS_BEST_PRACTICES.md
-│   └── SERVERLESS_EDGE_BEST_PRACTICES.md
-├── tool_setup_scripts/          # Development environment setup
+├── prompts/                     # 36 prompt templates
+│   ├── Bug fixing prompts (4)
+│   ├── Generic best practices prompts (2)
+│   └── Stack-specific best practices prompts (30)
+├── best_practices_guides/       # 30 best practices documents
+│   ├── Web Development (7 guides)
+│   ├── Systems & Languages (7 guides)
+│   ├── DevOps & Infrastructure (5 guides)
+│   ├── Data & AI (5 guides)
+│   └── Specialized Domains (6 guides)
+├── tool_setup_scripts/          # 13 development environment setup scripts
 │   ├── setup.sh                # Interactive menu
 │   ├── common_utils.sh         # Shared utilities
-│   ├── setup_python_fastapi.sh
-│   ├── setup_go_webapps.sh
-│   ├── setup_nextjs.sh
-│   ├── setup_sveltekit_remix_astro.sh
-│   ├── setup_rust.sh
-│   ├── setup_java_enterprise.sh
-│   ├── setup_bash_zsh.sh
-│   ├── setup_cloud_native_devops.sh
-│   ├── setup_genai_llm_ops.sh
-│   ├── setup_data_engineering.sh
-│   ├── setup_serverless_edge.sh
-│   └── README.md               # Setup scripts documentation
-├── pyproject.toml              # Python project configuration
-├── uv.lock                     # Locked dependencies
-├── .envrc                      # direnv configuration
-└── .gitignore                  # Git ignore patterns
+│   ├── README.md              # Setup scripts documentation
+│   ├── Web Development (4 scripts)
+│   ├── Systems & Languages (3 scripts)
+│   ├── DevOps & Infrastructure (3 scripts)
+│   └── Data & AI (3 scripts)
+└── __pycache__/                # Python cache (gitignored)
 ```
 
 ## 🔧 Advanced Topics
 
 ### Creating Custom Workflows
 
-1. **Define your tech stack config**
-2. **Create appropriate prompts**
-3. **Add best practices guides** (optional)
-4. **Configure problem commands**
+1. **Define your tech stack config** (see 33 examples)
+2. **Create appropriate prompts** (follow 36 existing patterns)
+3. **Add best practices guides** (optional, see 30 examples)
+4. **Configure problem commands** (type-check, lint, test)
 5. **Set appropriate chunk sizes** (20-75 based on complexity)
 6. **Test with small agent counts first**
 
 ### Scaling Considerations
 
 - Start small (5-10 agents) and scale up
+- Maximum 50 agents by default (configurable via `max_agents`)
 - Increase stagger time for many agents
 - Consider running in batches for 50+ agents
 - Use `--no-monitor` for headless operation
@@ -677,6 +770,7 @@ Configure custom git branches and remotes in your config:
 - **Context Threshold**: Lower values (15-20%) restart agents sooner
 - **Idle Timeout**: Adjust based on task complexity
 - **Check Interval**: Balance between responsiveness and CPU usage
+- **Max Agents**: Increase beyond 50 for powerful systems
 
 ## 🤝 Contributing
 
@@ -689,11 +783,16 @@ Contributions welcome! Please:
 
 ### Adding New Tech Stacks
 
-1. Create config file in `configs/`
-2. Add prompts in `prompts/`
-3. Write best practices guide in `best_practices_guides/`
-4. Add setup script in `tool_setup_scripts/`
+1. Create config file in `configs/` (33 examples to follow)
+2. Add prompts in `prompts/` (36 examples available)
+3. Write best practices guide in `best_practices_guides/` (30 examples)
+4. Add setup script in `tool_setup_scripts/` (13 examples)
 5. Test thoroughly with various project types
+6. Update this README with your addition
+
+## 👨‍💻 Author
+
+Created by Jeffrey Emanuel (jeffrey.emanuel@gmail.com)
 
 ## 📄 License
 
@@ -708,7 +807,30 @@ MIT License - see [LICENSE](LICENSE) file
 - **Check resource usage** for large agent counts
 - **Verify cc alias** is properly configured
 - **Ensure git is configured** with proper credentials
+- **Respect agent limits** (default max: 50)
 
 ---
 
 *Happy farming! 🚜 May your code be clean and your agents productive.*
+
+## 📊 Quick Reference
+
+### Tech Stack Support Summary
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Web Development | 7 | Next.js, Angular, Flutter, Laravel |
+| Systems & Languages | 7 | Python, Rust, Go, Java, C++ |
+| DevOps & Infrastructure | 5 | Terraform, Kubernetes, Ansible |
+| Data & AI | 5 | GenAI/LLM, Data Lakes, Polars |
+| Specialized | 6 | Security, Hardware, Blockchain |
+| **Total** | **29** | |
+
+### Resource Summary
+
+| Resource | Count |
+|----------|-------|
+| Configuration Files | 33 |
+| Prompt Templates | 36 |
+| Best Practices Guides | 30 |
+| Tool Setup Scripts | 13 |

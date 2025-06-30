@@ -1,10 +1,10 @@
 # The Definitive Guide to Flutter Mobile Development with Dart 3 & Impeller (Mid-2025)
 
-This guide synthesizes modern best practices for building production-grade, cross-platform mobile applications with Flutter 3.27+, Dart 3.6+, and the Impeller renderer. It moves beyond basic tutorials to provide battle-tested architectural patterns for scalable, performant applications.
+This guide synthesizes modern best practices for building production-grade, cross-platform mobile applications with Flutter 3.29+, Dart 3.6+, and the Impeller renderer. It moves beyond basic tutorials to provide battle-tested architectural patterns for scalable, performant applications.
 
 ### Prerequisites & Core Configuration
 
-Ensure your project uses **Flutter 3.27.0+**, **Dart 3.6.0+**, and targets **iOS 15+** and **Android API 24+** (Android 7.0).
+Ensure your project uses **Flutter 3.29.0+**, **Dart 3.6.0+**, and targets **iOS 15+** and **Android API 24+** (Android 7.0).
 
 Enable modern features in your `pubspec.yaml`:
 
@@ -16,29 +16,29 @@ publish_to: 'none'
 
 environment:
   sdk: '>=3.6.0 <4.0.0'
-  flutter: '>=3.27.0'
+  flutter: '>=3.29.0'
 
 dependencies:
   flutter:
     sdk: flutter
   
   # Core dependencies - pin exact versions for production
-  flutter_riverpod: 2.8.0
-  riverpod_annotation: 2.7.0
-  go_router: 15.2.0
-  dio: 5.8.0
-  freezed_annotation: 2.6.0
-  json_annotation: 4.11.0
-  drift: 2.25.0
+  flutter_riverpod: 2.6.1
+  riverpod_annotation: 2.6.1
+  go_router: 15.2.4
+  dio: 5.9.0
+  freezed_annotation: 3.0.6
+  json_annotation: 4.12.0
+  drift: 2.26.0
   sqlite3_flutter_libs: ^0.5.0
-  shared_preferences: 2.4.0
+  shared_preferences: 2.4.1
   flutter_secure_storage: 9.5.0
   
   # UI/UX enhancements
-  flutter_native_splash: 2.5.0
+  flutter_native_splash: 2.5.1
   cached_network_image: 3.5.0
   shimmer: 3.2.0
-  lottie: 3.3.0
+  lottie: 3.3.1
   
   # Platform integration
   permission_handler: 11.5.0
@@ -51,10 +51,10 @@ dev_dependencies:
   
   # Code generation
   build_runner: 2.4.16
-  riverpod_generator: 2.7.0
-  freezed: 2.6.0
+  riverpod_generator: 2.6.1
+  freezed: 3.0.6
   json_serializable: 6.10.0
-  drift_dev: 2.25.0
+  drift_dev: 2.26.0
   
   # Linting and analysis
   flutter_lints: 5.0.0
@@ -70,9 +70,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  # Enable Impeller globally (now default in 3.27+)
-  # Impeller provides ~2x better performance than Skia
-  # with predictable frame timing
+  # Impeller is now default on iOS and Android in Flutter 3.29+
+  # No configuration needed for Impeller - it's enabled by default
 ```
 
 Configure analysis options for strict type safety:
@@ -204,6 +203,8 @@ Run with: `flutter run -t lib/main_development.dart`
 ---
 
 ## 2. State Management with Riverpod 2.x
+
+**Note: Riverpod 3.0 is available in preview (3.0.0-dev.16). This guide uses stable 2.6.1, but consider migrating to 3.0 when stable for simplified APIs and better performance.**
 
 Riverpod 2.x with code generation is the gold standard for Flutter state management, offering compile-time safety, powerful testing capabilities, and excellent performance.
 
@@ -376,7 +377,7 @@ class ProductsViewModel extends ChangeNotifier {
 
 ## 3. Navigation with go_router
 
-go_router provides declarative, type-safe routing with deep linking support and excellent web compatibility.
+go_router provides declarative, type-safe routing with deep linking support and excellent web compatibility. As of 2025, go_router is in maintenance mode with the Flutter team focusing on stability rather than new features.
 
 ### ✅ DO: Define Type-Safe Routes with Extension Methods
 
@@ -551,21 +552,17 @@ Dio provides a robust HTTP client with interceptors, timeout handling, and excel
 ```dart
 // core/network/api_client.dart
 import 'package:dio/dio.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-part 'api_client.g.dart';
-
+// Dio 5.9.0 includes improved interceptor APIs and better error handling
 @riverpod
-Dio apiClient(ApiClientRef ref) {
+Dio apiClient(Ref ref) {
   final dio = Dio(BaseOptions(
-    baseUrl: ref.watch(environmentProvider).apiBaseUrl,
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 30),
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    },
+    baseUrl: const String.fromEnvironment('API_BASE_URL'),
+    connectTimeout: const Duration(seconds: 5),
+    receiveTimeout: const Duration(seconds: 10),
+    sendTimeout: const Duration(seconds: 10),
+    contentType: 'application/json',
   ));
 
   // Add interceptors
