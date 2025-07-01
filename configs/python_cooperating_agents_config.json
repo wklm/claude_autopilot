@@ -1,5 +1,5 @@
 {
-  "comment": "Advanced configuration for Python projects using uv package manager",
+  "comment": "Advanced configuration for Python projects using uv package manager with coordinating/cooperating agents!",
   "tech_stack": "python",
   "problem_commands": {
     "type_check": ["uv", "run", "mypy", "src", "--strict"],
@@ -7,7 +7,7 @@
   },
   "best_practices_files": [],
   "chunk_size": 75,
-  "agents": 15,
+  "agents": 6,
   "session": "claude_agents",
   "stagger": 12.0,
   "wait_after_cc": 20.0,
@@ -17,7 +17,7 @@
   "auto_restart": true,
   "no_monitor": false,
   "attach": false,
-  "prompt_file": "prompts/default_prompt_python.txt",
+  "prompt_file": "prompts/cooperating_agents_improvement_prompt_for_python_fastapi_postgres.txt",
   "context_threshold": 25,
   "idle_timeout": 90,
   "max_errors": 5,
