@@ -13,8 +13,9 @@ Claude Code Agent Farm is a powerful orchestration framework that runs multiple 
 ### Key Features
 
 - 🚀 **Parallel Processing**: Run 20+ Claude Code agents simultaneously (up to 50 with `max_agents` config)
-- 🎯 **Multiple Workflows**: Bug fixing or best practices implementation
-- 🌐 **Multi-Stack Support**: 33 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
+- 🎯 **Multiple Workflows**: Bug fixing, best practices implementation, or coordinated multi-agent development
+- 🤝 **Agent Coordination**: Advanced lock-based system prevents conflicts between parallel agents
+- 🌐 **Multi-Stack Support**: 34 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
 - 📊 **Smart Monitoring**: Real-time dashboard showing agent status and progress
 - 🔄 **Auto-Recovery**: Automatically restarts agents when needed
 - 📈 **Progress Tracking**: Git commits and structured progress documents
@@ -234,9 +235,85 @@ Agents systematically implement modern best practices:
 - Maintains continuity between sessions
 - Supports continuing existing work with special prompts
 
+### 3. Cooperating Agents Workflow (Advanced)
+
+The most sophisticated workflow option transforms the agent farm into a coordinated development team capable of complex, strategic improvements. Amazingly, this powerful feature is implemented entire by means of the prompt file! No actual code is needed to effectuate the system; rather, the LLM (particularly Opus 4) is simply smart enough to understand and reliably implement the system autonomously:
+
+#### Multi-Agent Coordination System
+
+This workflow implements a distributed coordination protocol that allows multiple agents to work on the same codebase simultaneously without conflicts. The system creates a `/coordination/` directory structure in your project:
+
+```
+/coordination/
+├── active_work_registry.json     # Central registry of all active work
+├── completed_work_log.json       # Log of completed tasks  
+├── agent_locks/                  # Directory for individual agent locks
+│   └── {agent_id}_{timestamp}.lock
+└── planned_work_queue.json       # Queue of planned but not started work
+```
+
+#### How It Works
+
+1. **Unique Agent Identity**: Each agent generates a unique ID (`agent_{timestamp}_{random_4_chars}`)
+
+2. **Work Claiming Process**: Before starting any work, agents must:
+   - Check the active work registry for conflicts
+   - Create a lock file claiming specific files and features
+   - Register their work plan with detailed scope information
+   - Update their status throughout the work cycle
+
+3. **Conflict Prevention**: The lock file system prevents multiple agents from:
+   - Modifying the same files simultaneously
+   - Implementing overlapping features
+   - Creating merge conflicts or breaking changes
+   - Duplicating completed work
+
+4. **Smart Work Distribution**: Agents automatically:
+   - Select non-conflicting work from available tasks
+   - Queue work if their preferred files are locked
+   - Handle stale locks (>2 hours old) intelligently
+   - Coordinate through descriptive git commits
+
+#### Why This Works Well
+
+This coordination system solves several critical problems:
+
+- **Eliminates Merge Conflicts**: Lock-based file claiming ensures clean parallel development
+- **Prevents Wasted Work**: Agents check completed work log before starting
+- **Enables Complex Tasks**: Unlike simple bug fixing, agents can tackle strategic improvements
+- **Maintains Code Stability**: Functionality testing requirements prevent breaking changes
+- **Scales Efficiently**: 20+ agents can work productively without stepping on each other
+- **Business Value Focus**: Requires justification and planning before implementation
+
+#### Advanced Features
+
+- **Stale Lock Detection**: Automatically handles abandoned work after 2 hours
+- **Emergency Coordination**: Alert system for critical conflicts
+- **Progress Transparency**: All agents can see what others are working on
+- **Atomic Work Units**: Each agent completes full features before releasing locks
+- **Detailed Planning**: Agents must create comprehensive plans before claiming work
+
+#### Best Use Cases
+
+This workflow excels at:
+- Large-scale refactoring projects
+- Implementing complex architectural changes
+- Adding comprehensive type hints across a codebase
+- Systematic performance optimizations
+- Multi-faceted security improvements
+- Feature development requiring coordination
+
+To use this workflow, specify the cooperating agents prompt:
+```bash
+claude-code-agent-farm \
+  --path /project \
+  --prompt-file prompts/cooperating_agents_improvement_prompt_for_python_fastapi_postgres.txt \
+  --agents 5
+```
+
 ## 🌐 Technology Stack Support
 
-### Complete List of 33 Supported Tech Stacks
+### Complete List of 34 Supported Tech Stacks
 
 The project includes pre-configured support for:
 
@@ -272,21 +349,22 @@ The project includes pre-configured support for:
 23. **Data Lakes** - Kafka, Snowflake, Spark integration
 24. **Polars/DuckDB** - High-performance data processing
 25. **Excel Automation** - Python-based Excel automation with Azure
+26. **PostgreSQL 17 & Python** - Modern PostgreSQL 17 with FastAPI/SQLModel
 
 #### Specialized Domains
-26. **Serverless Edge** - Edge computing and serverless
-27. **Kubernetes AI Inference** - AI inference on Kubernetes
-28. **Security Engineering** - Security best practices and tooling
-29. **Hardware Development** - Embedded systems and hardware design
-30. **Unreal Engine** - Game development with Unreal Engine 5
-31. **Solana/Anchor** - Blockchain development on Solana
-32. **Cosmos** - Cosmos blockchain ecosystem
-33. **React Native** - Cross-platform mobile development
+27. **Serverless Edge** - Edge computing and serverless
+28. **Kubernetes AI Inference** - AI inference on Kubernetes
+29. **Security Engineering** - Security best practices and tooling
+30. **Hardware Development** - Embedded systems and hardware design
+31. **Unreal Engine** - Game development with Unreal Engine 5
+32. **Solana/Anchor** - Blockchain development on Solana
+33. **Cosmos** - Cosmos blockchain ecosystem
+34. **React Native** - Cross-platform mobile development
 
 Each stack includes:
 - Optimized configuration file
 - Technology-specific prompts
-- Comprehensive best practices guide (30 guides total)
+- Comprehensive best practices guide (31 guides total)
 - Appropriate chunk sizes and timing
 
 ### Custom Tech Stacks
@@ -353,7 +431,7 @@ Create your own configuration:
 
 ### Key Parameters
 
-- **tech_stack**: Technology identifier (one of 33 supported stacks)
+- **tech_stack**: Technology identifier (one of 34 supported stacks)
 - **problem_commands**: Commands for type-checking, linting, and testing
 - **best_practices_files**: Guides to copy to the project
 - **chunk_size**: How many lines/changes per agent iteration (varies by stack: 20-75)
@@ -417,7 +495,7 @@ Advanced:
 
 ## 📝 Prompt System
 
-### Complete Prompt Inventory (36 Prompts)
+### Complete Prompt Inventory (37 Prompts)
 
 The system includes specialized prompts for all workflows and tech stacks:
 
@@ -426,6 +504,9 @@ The system includes specialized prompts for all workflows and tech stacks:
 - `default_prompt_nextjs.txt` - Next.js specific
 - `default_prompt_python.txt` - Python specific
 - `bug_fixing_prompt_for_nextjs.txt` - Advanced Next.js fixing
+
+#### Cooperating Agents Prompts (1)
+- `cooperating_agents_improvement_prompt_for_python_fastapi_postgres.txt` - Multi-agent coordination system
 
 #### Best Practices Implementation Prompts (31)
 - `default_best_practices_prompt.txt` - Generic implementation
@@ -686,6 +767,16 @@ claude-code-agent-farm \
   --config configs/polars_duckdb_config.json
 ```
 
+### Cooperating Agents Mode
+```bash
+# Advanced multi-agent coordination for complex improvements
+claude-code-agent-farm \
+  --path /project \
+  --prompt-file prompts/cooperating_agents_improvement_prompt_for_python_fastapi_postgres.txt \
+  --agents 20 \
+  --auto-restart
+```
+
 ## 🚨 Troubleshooting
 
 ### Common Issues
@@ -769,15 +860,16 @@ claude_code_agent_farm/
 │   ├── solana_anchor_config.json # Solana blockchain
 │   ├── cosmos_blockchain_config.json # Cosmos blockchain
 │   └── sample.json             # Example configuration
-├── prompts/                     # 40 prompt templates
+├── prompts/                     # 37 prompt templates
 │   ├── Bug fixing prompts (4)
+│   ├── Cooperating agents prompts (1)
 │   ├── Generic best practices prompts (2)
-│   └── Stack-specific best practices prompts (34)
-├── best_practices_guides/       # 34 best practices documents
+│   └── Stack-specific best practices prompts (30)
+├── best_practices_guides/       # 35 best practices documents
 │   ├── Web Development (7 guides)
 │   ├── Systems & Languages (7 guides)
 │   ├── DevOps & Infrastructure (5 guides)
-│   ├── Data & AI (5 guides)
+│   ├── Data & AI (6 guides)
 │   └── Specialized Domains (6 guides)
 ├── tool_setup_scripts/          # 24 development environment setup scripts
 │   ├── setup.sh                # Interactive menu
@@ -794,9 +886,9 @@ claude_code_agent_farm/
 
 ### Creating Custom Workflows
 
-1. **Define your tech stack config** (see 33 examples)
-2. **Create appropriate prompts** (follow 36 existing patterns)
-3. **Add best practices guides** (optional, see 30 examples)
+1. **Define your tech stack config** (see 34 examples)
+2. **Create appropriate prompts** (follow 37 existing patterns)
+3. **Add best practices guides** (optional, see 35 examples)
 4. **Configure problem commands** (type-check, lint, test)
 5. **Set appropriate chunk sizes** (20-75 based on complexity)
 6. **Test with small agent counts first**
@@ -898,9 +990,9 @@ Contributions welcome! Please:
 
 ### Adding New Tech Stacks
 
-1. Create config file in `configs/` (33 examples to follow)
-2. Add prompts in `prompts/` (36 examples available)
-3. Write best practices guide in `best_practices_guides/` (30 examples)
+1. Create config file in `configs/` (34 examples to follow)
+2. Add prompts in `prompts/` (37 examples available)
+3. Write best practices guide in `best_practices_guides/` (35 examples)
 4. Add setup script in `tool_setup_scripts/` (15 examples)
 5. Test thoroughly with various project types
 6. Update this README with your addition
@@ -958,15 +1050,15 @@ MIT License - see [LICENSE](LICENSE) file
 | Web Development | 8 | Next.js, Angular, Flutter, Laravel, React Native |
 | Systems & Languages | 7 | Python, Rust, Go, Java, C++ |
 | DevOps & Infrastructure | 6 | Terraform, Kubernetes, Ansible |
-| Data & AI | 7 | GenAI/LLM, LLM Dev/Testing, Data Lakes, Polars |
+| Data & AI | 8 | GenAI/LLM, Data Lakes, PostgreSQL 17, Polars |
 | Specialized | 5 | Security, Hardware, Blockchain |
-| **Total** | **33** | |
+| **Total** | **34** | |
 
 ### Resource Summary
 
 | Resource | Count |
 |----------|-------|
 | Configuration Files | 37 |
-| Prompt Templates | 40 |
-| Best Practices Guides | 34 |
+| Prompt Templates | 37 |
+| Best Practices Guides | 35 |
 | Tool Setup Scripts | 24 |
