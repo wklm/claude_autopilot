@@ -212,14 +212,13 @@ class AgentMonitor:
         self.project_path = project_path
         
         # Setup heartbeats directory
+        self.heartbeats_dir: Optional[Path] = None
         if self.project_path:
             self.heartbeats_dir = self.project_path / ".heartbeats"
             self.heartbeats_dir.mkdir(exist_ok=True)
             # Clean up any old heartbeat files
             for hb_file in self.heartbeats_dir.glob("agent*.heartbeat"):
                 hb_file.unlink(missing_ok=True)
-        else:
-            self.heartbeats_dir = None
 
         # Initialize agent tracking
         for i in range(num_agents):
@@ -414,11 +413,8 @@ class AgentMonitor:
         title = f"[{agent_id:02d}] {status_emoji} Context: {context_str}"
         
         # Set pane title
-        try:
+        with contextlib.suppress(subprocess.CalledProcessError):
             run(f"tmux select-pane -t {pane_target} -T {shlex.quote(title)}", quiet=True)
-        except subprocess.CalledProcessError:
-            # Silently ignore if tmux command fails
-            pass
 
     def _update_heartbeat(self, agent_id: int) -> None:
         """Update heartbeat file for an agent"""
@@ -2237,7 +2233,7 @@ def doctor(
                         console.print(f"     ⚠️  {tool} not found")
                         warnings_found += 1
         else:
-            console.print(f"\n[bold]8. Project Path[/bold]")
+            console.print("\n[bold]8. Project Path[/bold]")
             console.print(f"  ❌ Invalid project path: {path}")
             issues_found += 1
     
