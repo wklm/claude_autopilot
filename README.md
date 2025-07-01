@@ -16,13 +16,13 @@ Claude Code Agent Farm is a powerful orchestration framework that runs multiple 
 - 🎯 **Multiple Workflows**: Bug fixing, best practices implementation, or coordinated multi-agent development
 - 🤝 **Agent Coordination**: Advanced lock-based system prevents conflicts between parallel agents
 - 🌐 **Multi-Stack Support**: 34 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
-- 📊 **Smart Monitoring**: Real-time dashboard showing agent status and progress
+- 📊 **Smart Monitoring**: Real-time dashboard with context warnings, heartbeat tracking, and tmux pane titles
 - 🔄 **Auto-Recovery**: Automatically restarts agents when needed
 - 📈 **Progress Tracking**: Git commits and structured progress documents
-- ⚙️ **Highly Configurable**: JSON configs with variable substitution
+- ⚙️ **Highly Configurable**: JSON configs with variable substitution and dynamic chunk sizing
 - 🖥️ **Flexible Viewing**: Multiple tmux viewing modes
 - 🔒 **Safe Operation**: Automatic settings backup/restore, file locking, atomic operations
-- 🛠️ **Development Setup**: 24 integrated tool installation scripts for complete environments
+- 🛠️ **Development Setup**: 24 integrated tool installation scripts and pre-flight verification
 
 ## 📋 Prerequisites
 
@@ -63,7 +63,22 @@ The setup script will:
 - Set up direnv for automatic environment activation
 - Handle both bash and zsh shells automatically
 
-### 2. Choose Your Workflow
+### 2. Verify Your Setup
+
+Run the pre-flight verifier to ensure everything is configured correctly:
+
+```bash
+claude-code-agent-farm doctor --path /path/to/project
+```
+
+This command checks:
+- Python version compatibility
+- Required tools installation (tmux, git, uv)
+- Claude Code configuration and API keys
+- Project-specific tool availability
+- File permissions and common issues
+
+### 3. Choose Your Workflow
 
 #### For Bug Fixing (Traditional)
 ```bash
@@ -434,7 +449,7 @@ Create your own configuration:
 - **tech_stack**: Technology identifier (one of 34 supported stacks)
 - **problem_commands**: Commands for type-checking, linting, and testing
 - **best_practices_files**: Guides to copy to the project
-- **chunk_size**: How many lines/changes per agent iteration (varies by stack: 20-75)
+- **chunk_size**: Base lines/changes per agent iteration (dynamically adjusted based on remaining work)
 - **prompt_file**: Which prompt template to use (36 available)
 - **agents**: Number of agents to run (default: 20)
 - **max_agents**: Maximum allowed agents (default: 50)
@@ -459,6 +474,10 @@ claude-code-agent-farm \
 #### Complete Options Reference
 
 ```
+Commands:
+  doctor                   Run pre-flight verification checks
+  monitor-only             Display monitor dashboard (internal use)
+
 Required:
   --path PATH               Project root directory
 
@@ -618,11 +637,19 @@ Work on approximately {chunk_size} improvements at a time...
 The Python script includes a real-time monitoring dashboard that shows:
 
 - **Agent Status**: Working, Idle, Context Low, Error, Disabled
-- **Context Usage**: Percentage of agent's context window used
+- **Context Usage**: Percentage of agent's context window used with visual warnings
+- **Heartbeat Age**: Time since last agent activity pulse (color-coded)
 - **Last Activity**: Time since the agent last did something
 - **Last Error**: Most recent error message (if any)
 - **Session Stats**: Total restarts, uptime, active agents
 - **Cycle Count**: Number of work cycles completed
+
+### Context Warnings
+
+Each tmux pane displays context warnings in its title bar:
+- ⚠️ **Critical** (≤20%): Agent will restart soon
+- ⚡ **Low** (≤30%): Context running low
+- Normal percentage display for healthy levels
 
 ### Built-in Dashboard
 
@@ -630,13 +657,13 @@ The monitoring dashboard runs in the tmux controller window:
 
 ```
 Claude Agent Farm - 14:32:15
-┏━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━┓
-┃ Agent    ┃ Status     ┃ Cycles ┃ Context  ┃ Runtime      ┃ Errors ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━┩
-│ Pane 00  │ working    │ 2      │ 75%      │ 0:05:23      │ 0      │
-│ Pane 01  │ working    │ 2      │ 82%      │ 0:05:19      │ 0      │
-│ Pane 02  │ idle       │ 3      │ 45%      │ 0:05:15      │ 0      │
-└──────────┴────────────┴────────┴──────────┴──────────────┴────────┘
+┏━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━┓
+┃ Agent    ┃ Status     ┃ Cycles ┃ Context  ┃ Runtime      ┃ Heartbeat┃ Errors ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━┩
+│ Pane 00  │ working    │ 2      │ 75%      │ 0:05:23      │ 12s      │ 0      │
+│ Pane 01  │ working    │ 2      │ 82%      │ 0:05:19      │ 8s       │ 0      │
+│ Pane 02  │ idle       │ 3      │ 45%      │ 0:05:15      │ 45s      │ 0      │
+└──────────┴────────────┴────────┴──────────┴──────────────┴──────────┴────────┘
 ```
 
 ### Viewing Options
@@ -662,8 +689,9 @@ tmux attach -t claude_agents:controller  # Dashboard only
 ### Auto-Restart Features
 
 When `--auto-restart` is enabled:
-- Monitors agent health continuously
-- Restarts agents that hit errors or go idle
+- Monitors agent health continuously via heartbeat files
+- Restarts agents that hit errors, go idle, or have stale heartbeats (>2 minutes)
+- Monitors context percentage and restarts when below threshold
 - Implements exponential backoff to prevent restart loops
   - Initial wait: 10 seconds
   - Doubles with each restart (max 5 minutes)
@@ -810,8 +838,10 @@ claude-code-agent-farm \
 ### Debug Features
 
 - **State File**: Check `.claude_agent_farm_state.json` for agent status
+- **Heartbeat Files**: Monitor `.heartbeats/agent*.heartbeat` for activity tracking
 - **Lock Files**: Look for `.agent_farm_launch.lock` in `~/.claude/`
 - **Backup Directory**: `~/.claude/backups/` contains settings backups
+- **Pre-flight Check**: Run `claude-code-agent-farm doctor` to diagnose issues
 - **Emergency Cleanup**: Ctrl+C triggers graceful shutdown
 - **Manual tmux**: `tmux kill-session -t claude_agents` to force cleanup
 
@@ -819,7 +849,7 @@ claude-code-agent-farm \
 
 ```
 claude_code_agent_farm/
-├── claude_code_agent_farm.py    # Main orchestrator (1887 lines)
+├── claude_code_agent_farm.py    # Main orchestrator
 ├── view_agents.sh               # Tmux viewer utility
 ├── setup.sh                     # Automated setup
 ├── pyproject.toml              # Python project configuration
@@ -931,14 +961,18 @@ Configure custom git branches and remotes in your config:
 
 ### Performance Tuning
 
-- **Chunk Size**: Smaller chunks (20-30) for complex tasks, larger (50-75) for simple fixes
-  - Recommended sizes by stack: Python (50), Next.js (50), Rust (30), Go (40), Java (35)
+- **Chunk Size**: Automatically adjusts based on remaining work
+  - Base sizes by stack: Python (50), Next.js (50), Rust (30), Go (40), Java (35)
+  - Dynamic formula: `max(10, total_lines / agents / 2)`
+  - Prevents agents from running out of work or doing trivial tasks
 - **Stagger Time**: Increase for many agents or slow systems
   - Default 10s prevents settings corruption
   - Automatically doubles on error detection
 - **Context Threshold**: Lower values (15-20%) restart agents sooner
+  - Visual warnings appear in tmux pane titles
 - **Idle Timeout**: Adjust based on task complexity
 - **Check Interval**: Balance between responsiveness and CPU usage
+- **Heartbeat Monitoring**: Detects stuck agents (>2 minutes since last pulse)
 - **Max Agents**: Increase beyond 50 for powerful systems
 - **Wait After CC**: Default 15s ensures Claude is fully ready
   - Increase if seeing startup failures
@@ -1023,6 +1057,8 @@ MIT License - see [LICENSE](LICENSE) file
 
 ### Monitoring Tools
 - Monitor state file (`.claude_agent_farm_state.json`) for external integrations
+- Heartbeat files (`.heartbeats/agent*.heartbeat`) track agent activity
+- tmux pane titles show real-time context warnings
 - tmux session logs for debugging agent issues
 - Git commit history for tracking improvements
 
