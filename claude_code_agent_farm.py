@@ -811,9 +811,15 @@ class ClaudeAgentFarm:
                         tmpfile_path.unlink(missing_ok=True)
                         raise KeyboardInterrupt()
 
-                    subprocess.run(
+                    result = subprocess.run(
                         type_check_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path
                     )
+                    # Ensure all output is written to disk
+                    tmpfile.flush()
+                    os.fsync(tmpfile.fileno())
+                    
+                    # Small delay to ensure process cleanup
+                    time.sleep(0.5)
 
                 # Run lint
                 lint_cmd = commands.get('lint')
@@ -828,7 +834,10 @@ class ClaudeAgentFarm:
                         tmpfile_path.unlink(missing_ok=True)
                         raise KeyboardInterrupt()
 
-                    subprocess.run(lint_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)
+                    result = subprocess.run(lint_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)  # noqa: F841
+                    # Ensure all output is written to disk
+                    tmpfile.flush()
+                    os.fsync(tmpfile.fileno())
 
             # Atomic rename (handle cross-filesystem moves)
             try:
