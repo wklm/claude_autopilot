@@ -130,7 +130,7 @@ def line_count(file_path: Path) -> int:
         return 0
 
 
-def tmux_send(target: str, data: str, enter: bool = True) -> None:
+def tmux_send(target: str, data: str, enter: bool = True, update_heartbeat: bool = True) -> None:
     """Send keystrokes to a tmux pane (binary-safe)"""
     max_retries = 3
     base_delay = 0.5
@@ -145,6 +145,19 @@ def tmux_send(target: str, data: str, enter: bool = True) -> None:
                     time.sleep(0.2)
             if enter:
                 run(f"tmux send-keys -t {target} C-m", quiet=True)
+            
+            # Update heartbeat if requested (default True)
+            if update_heartbeat:
+                # Extract agent ID from target (format: session:window.pane)
+                try:
+                    pane_id = target.split('.')[-1]
+                    agent_id = int(pane_id)
+                    heartbeat_file = Path(".heartbeats") / f"agent{agent_id:02d}.heartbeat"
+                    if heartbeat_file.parent.exists():
+                        heartbeat_file.write_text(datetime.now().isoformat())
+                except (ValueError, IndexError, OSError):
+                    # Silently ignore heartbeat errors
+                    pass
             break
         except subprocess.CalledProcessError:
             if attempt < max_retries - 1:
@@ -185,6 +198,7 @@ class AgentMonitor:
         context_threshold: int = 20,
         idle_timeout: int = 60,
         max_errors: int = 3,
+        project_path: Optional[Path] = None,
     ):
         self.session = session
         self.num_agents = num_agents
@@ -195,6 +209,17 @@ class AgentMonitor:
         self.context_threshold = context_threshold
         self.idle_timeout = idle_timeout
         self.max_errors = max_errors
+        self.project_path = project_path
+        
+        # Setup heartbeats directory
+        if self.project_path:
+            self.heartbeats_dir = self.project_path / ".heartbeats"
+            self.heartbeats_dir.mkdir(exist_ok=True)
+            # Clean up any old heartbeat files
+            for hb_file in self.heartbeats_dir.glob("agent*.heartbeat"):
+                hb_file.unlink(missing_ok=True)
+        else:
+            self.heartbeats_dir = None
 
         # Initialize agent tracking
         for i in range(num_agents):
@@ -207,6 +232,7 @@ class AgentMonitor:
                 "last_activity": datetime.now(),
                 "restart_count": 0,
                 "last_restart": None,
+                "last_heartbeat": None,
             }
 
     def detect_context_percentage(self, content: str) -> Optional[int]:
@@ -332,27 +358,107 @@ class AgentMonitor:
         if self.has_settings_error(content):
             agent["status"] = "error"
             agent["errors"] += 1
-            return agent
-
-        # Update status based on activity
-        if self.is_claude_working(content):
-            agent["status"] = "working"
-            agent["last_activity"] = datetime.now()
-        elif self.is_claude_ready(content):
-            # Check if idle for too long
-            idle_time = (datetime.now() - agent["last_activity"]).total_seconds()
-            if idle_time > self.idle_timeout:
-                agent["status"] = "idle"
-            else:
-                agent["status"] = "ready"
         else:
-            agent["status"] = "unknown"
+            # Update status based on activity
+            if self.is_claude_working(content):
+                agent["status"] = "working"
+                agent["last_activity"] = datetime.now()
+                # Update heartbeat when agent is actively working
+                self._update_heartbeat(agent_id)
+            elif self.is_claude_ready(content):
+                # Check if idle for too long
+                idle_time = (datetime.now() - agent["last_activity"]).total_seconds()
+                if idle_time > self.idle_timeout:
+                    agent["status"] = "idle"
+                else:
+                    agent["status"] = "ready"
+                    # Update heartbeat when agent is ready (not idle)
+                    self._update_heartbeat(agent_id)
+            else:
+                agent["status"] = "unknown"
+        
+        # Update tmux pane title with context information
+        self._update_pane_title(agent_id, agent)
 
         return agent
+    
+    def _update_pane_title(self, agent_id: int, agent: Dict) -> None:
+        """Update tmux pane title with agent status and context percentage"""
+        pane_target = self.pane_mapping.get(agent_id)
+        if not pane_target:
+            return
+        
+        # Build title with context warning
+        context = agent["last_context"]
+        status = agent["status"]
+        
+        # Create context indicator with warning colors
+        if context <= self.context_threshold:
+            context_str = f"⚠️ {context}%"
+        elif context <= 30:
+            context_str = f"⚡{context}%"
+        else:
+            context_str = f"{context}%"
+        
+        # Status emoji
+        status_emoji = {
+            "working": "🔧",
+            "ready": "✅",
+            "idle": "💤",
+            "error": "❌",
+            "starting": "🚀",
+            "unknown": "❓"
+        }.get(status, "")
+        
+        # Build title
+        title = f"[{agent_id:02d}] {status_emoji} Context: {context_str}"
+        
+        # Set pane title
+        try:
+            run(f"tmux select-pane -t {pane_target} -T {shlex.quote(title)}", quiet=True)
+        except subprocess.CalledProcessError:
+            # Silently ignore if tmux command fails
+            pass
 
+    def _update_heartbeat(self, agent_id: int) -> None:
+        """Update heartbeat file for an agent"""
+        if not self.heartbeats_dir:
+            return
+        
+        heartbeat_file = self.heartbeats_dir / f"agent{agent_id:02d}.heartbeat"
+        try:
+            # Write current timestamp to heartbeat file
+            heartbeat_file.write_text(datetime.now().isoformat())
+            self.agents[agent_id]["last_heartbeat"] = datetime.now()
+        except Exception:
+            # Silently ignore heartbeat write errors
+            pass
+    
+    def _check_heartbeat_age(self, agent_id: int) -> Optional[float]:
+        """Check age of heartbeat file in seconds"""
+        if not self.heartbeats_dir:
+            return None
+        
+        heartbeat_file = self.heartbeats_dir / f"agent{agent_id:02d}.heartbeat"
+        if not heartbeat_file.exists():
+            return None
+        
+        try:
+            mtime = heartbeat_file.stat().st_mtime
+            age = time.time() - mtime
+            return age
+        except Exception:
+            return None
+    
     def needs_restart(self, agent_id: int) -> bool:
         """Determine if an agent needs to be restarted"""
         agent = self.agents[agent_id]
+        
+        # Check heartbeat age - if older than 2 minutes, agent might be stuck
+        heartbeat_age = self._check_heartbeat_age(agent_id)
+        if heartbeat_age is not None and heartbeat_age > 120:
+            console.print(f"[yellow]Agent {agent_id} heartbeat is {heartbeat_age:.0f}s old[/yellow]")
+            return True
 
         # Restart conditions
         return bool(
@@ -374,6 +480,7 @@ class AgentMonitor:
         table.add_column("Cycles", style="yellow", width=6)
         table.add_column("Context", style="magenta", width=8)
         table.add_column("Runtime", style="blue", width=12)
+        table.add_column("Heartbeat", style="cyan", width=8)
         table.add_column("Errors", style="red", width=6)
 
         for agent_id in sorted(self.agents.keys()):
@@ -388,6 +495,17 @@ class AgentMonitor:
                 "starting": "[yellow]",
                 "unknown": "[dim]",
             }.get(agent["status"], "")
+            
+            # Get heartbeat age
+            heartbeat_age = self._check_heartbeat_age(agent_id)
+            if heartbeat_age is None:
+                heartbeat_str = "---"
+            elif heartbeat_age < 30:
+                heartbeat_str = f"[green]{heartbeat_age:.0f}s[/green]"
+            elif heartbeat_age < 60:
+                heartbeat_str = f"[yellow]{heartbeat_age:.0f}s[/yellow]"
+            else:
+                heartbeat_str = f"[red]{heartbeat_age:.0f}s[/red]"
 
             table.add_row(
                 f"Pane {agent_id:02d}",
@@ -395,6 +513,7 @@ class AgentMonitor:
                 str(agent["cycles"]),
                 f"{agent['last_context']}%",
                 runtime,
+                heartbeat_str,
                 str(agent["errors"]),
             )
 
@@ -758,6 +877,26 @@ class ClaudeAgentFarm:
         # prompt_text = prompt_text.replace('{tech_stack}', getattr(self, 'tech_stack', 'generic'))
         
         return prompt_text
+    
+    def _calculate_dynamic_chunk_size(self) -> int:
+        """Calculate optimal chunk size based on remaining lines in the problems file"""
+        if not self.combined_file.exists():
+            return getattr(self, 'chunk_size', 50)
+        
+        # Count total lines in problems file
+        total_lines = line_count(self.combined_file)
+        
+        # If file is small or empty, use minimum chunk size
+        if total_lines < 100:
+            return 10
+        
+        # Calculate optimal chunk size: max(10, total_lines / agents / 2)
+        # This ensures agents have work but not too much per iteration
+        optimal_chunk = max(10, total_lines // self.agents // 2)
+        
+        # Cap at configured maximum if specified
+        configured_chunk = getattr(self, 'chunk_size', 50)
+        return min(optimal_chunk, configured_chunk)
 
     def regenerate_problems(self) -> None:
         """Regenerate the type-checker and linter problems file"""
@@ -1083,6 +1222,10 @@ class ClaudeAgentFarm:
         # Enable mouse support if configured
         if self.tmux_mouse:
             run(f"tmux set-option -t {self.session} -g mouse on", quiet=True)
+        
+        # Enable pane titles for context display
+        run(f"tmux set-option -t {self.session} -g pane-border-status top", quiet=True)
+        run(f"tmux set-option -t {self.session} -g pane-border-format ' #{{pane_title}} '", quiet=True)
 
         # Automatically adjust font size for many panes
         if self.agents >= 10:
@@ -1394,11 +1537,23 @@ class ClaudeAgentFarm:
 
         # Send prompt with unique seed for randomization
         seed = randint(100000, 999999)
+        
+        # Calculate dynamic chunk size and update prompt text if needed
+        dynamic_chunk_size = self._calculate_dynamic_chunk_size()
+        current_prompt = self.prompt_text
+        
+        # If dynamic chunk size differs from configured, update the prompt
+        configured_chunk = getattr(self, 'chunk_size', 50)
+        if dynamic_chunk_size != configured_chunk:
+            current_prompt = current_prompt.replace(f'{{{configured_chunk}}}', f'{{{dynamic_chunk_size}}}')
+            current_prompt = current_prompt.replace(f'{configured_chunk}', str(dynamic_chunk_size))
+            console.print(f"[dim]Agent {agent_id:02d}: Dynamic chunk size: {dynamic_chunk_size} (was {configured_chunk})[/dim]")
+        
         # Use regex to handle variations like "random chunks of 50 lines"
         salted_prompt = re.sub(
             r"random chunks(\b.*?\b)?",
             lambda m: f"{m.group(0)} (instance-seed {seed})",
-            self.prompt_text,
+            current_prompt,
             count=1,
             flags=re.IGNORECASE,
         )
@@ -1569,6 +1724,7 @@ class ClaudeAgentFarm:
                 context_threshold=self.context_threshold,
                 idle_timeout=self.idle_timeout,
                 max_errors=self.max_errors,
+                project_path=self.project_path,
             )
 
             # Launch agents
@@ -1592,7 +1748,7 @@ class ClaudeAgentFarm:
         for i in range(self.agents):
             pane_target = self.pane_mapping.get(i)
             if pane_target:
-                tmux_send(pane_target, "/exit")
+                tmux_send(pane_target, "/exit", update_heartbeat=False)
 
         time.sleep(2)
 
@@ -1606,6 +1762,18 @@ class ClaudeAgentFarm:
         if hasattr(self, "state_file") and self.state_file.exists():
             self.state_file.unlink()
             console.print("[green]✓ Monitor state file cleaned up[/green]")
+        
+        # Clean up heartbeat files
+        heartbeats_dir = self.project_path / ".heartbeats"
+        if heartbeats_dir.exists():
+            for hb_file in heartbeats_dir.glob("agent*.heartbeat"):
+                hb_file.unlink(missing_ok=True)
+            try:
+                heartbeats_dir.rmdir()  # Remove directory if empty
+                console.print("[green]✓ Heartbeat files cleaned up[/green]")
+            except OSError:
+                # Directory not empty or other error
+                pass
 
         # Restore font size if we changed it
         if hasattr(self, "_zoom_adjusted") and self._zoom_adjusted:
@@ -1889,6 +2057,245 @@ def monitor_only(
                 wrapped_error = textwrap.fill(f"Error reading state: {e}", width=60)
                 live.update(f"[red]{wrapped_error}[/red]")
                 time.sleep(1)
+
+
+@app.command(name="doctor")
+def doctor(
+    path: Optional[str] = typer.Option(None, "--path", help="Project path to check (optional)"),
+) -> None:
+    """Pre-flight verifier to check system configuration and catch common setup errors"""
+    console.print(
+        Panel.fit(
+            "[bold cyan]Claude Agent Farm Doctor[/bold cyan]\nChecking system configuration...",
+            border_style="cyan",
+            box=box.DOUBLE,
+        )
+    )
+    
+    issues_found = 0
+    warnings_found = 0
+    
+    # Helper function to check if command exists
+    def command_exists(cmd: str) -> bool:
+        """Check if a command exists in PATH"""
+        try:
+            result = subprocess.run(["which", cmd], capture_output=True, text=True)
+            return result.returncode == 0
+        except Exception:
+            return False
+    
+    # 1. Check Python version
+    console.print("\n[bold]1. Python Version[/bold]")
+    py_version = sys.version_info
+    if py_version >= (3, 13):
+        console.print(f"  ✅ Python {py_version.major}.{py_version.minor}.{py_version.micro}")
+    else:
+        console.print(f"  ❌ Python {py_version.major}.{py_version.minor}.{py_version.micro} (requires 3.13+)")
+        issues_found += 1
+    
+    # 2. Check tmux
+    console.print("\n[bold]2. tmux Installation[/bold]")
+    if command_exists("tmux"):
+        ret, stdout, _ = run("tmux -V", capture=True, quiet=True)
+        if ret == 0:
+            console.print(f"  ✅ {stdout.strip()}")
+        else:
+            console.print("  ❌ tmux found but version check failed")
+            issues_found += 1
+    else:
+        console.print("  ❌ tmux not found in PATH")
+        issues_found += 1
+    
+    # 3. Check cc alias
+    console.print("\n[bold]3. Claude Code Alias[/bold]")
+    # Check in bash
+    bash_has_cc = False
+    try:
+        ret, stdout, _ = run("bash -i -c 'alias cc 2>/dev/null'", capture=True, quiet=True)
+        if ret == 0 and "claude" in stdout and "--dangerously-skip-permissions" in stdout:
+            bash_has_cc = True
+    except Exception:
+        pass
+    
+    # Check in zsh if it exists
+    zsh_has_cc = False
+    if Path(os.path.expanduser("~/.zshrc")).exists():
+        try:
+            ret, stdout, _ = run("zsh -i -c 'alias cc 2>/dev/null'", capture=True, quiet=True)
+            if ret == 0 and "claude" in stdout and "--dangerously-skip-permissions" in stdout:
+                zsh_has_cc = True
+        except Exception:
+            pass
+    
+    if bash_has_cc or zsh_has_cc:
+        console.print("  ✅ cc alias configured correctly")
+        if bash_has_cc:
+            console.print("     - Found in bash")
+        if zsh_has_cc:
+            console.print("     - Found in zsh")
+    else:
+        console.print("  ❌ cc alias not configured or incorrect")
+        console.print("     Expected: alias cc=\"ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions\"")
+        issues_found += 1
+    
+    # 4. Check Claude Code installation
+    console.print("\n[bold]4. Claude Code Installation[/bold]")
+    if command_exists("claude"):
+        console.print("  ✅ claude command found")
+    else:
+        console.print("  ❌ claude command not found in PATH")
+        issues_found += 1
+    
+    # 5. Check Anthropic API key
+    console.print("\n[bold]5. Anthropic API Configuration[/bold]")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        console.print(f"  ✅ ANTHROPIC_API_KEY set ({len(api_key)} chars)")
+    else:
+        # Check Claude settings file
+        claude_settings = Path.home() / ".claude" / "settings.json"
+        if claude_settings.exists():
+            try:
+                with claude_settings.open() as f:
+                    settings = json.load(f)
+                    if settings.get("apiKey") or settings.get("anthropicApiKey"):
+                        console.print("  ✅ API key found in Claude settings")
+                    else:
+                        console.print("  ⚠️  No API key in environment or Claude settings")
+                        warnings_found += 1
+            except Exception:
+                console.print("  ⚠️  Could not read Claude settings")
+                warnings_found += 1
+        else:
+            console.print("  ⚠️  No API key in environment and no Claude settings found")
+            warnings_found += 1
+    
+    # 6. Check git
+    console.print("\n[bold]6. Git Configuration[/bold]")
+    if command_exists("git"):
+        ret, stdout, _ = run("git --version", capture=True, quiet=True)
+        if ret == 0:
+            console.print(f"  ✅ {stdout.strip()}")
+        else:
+            console.print("  ❌ git found but version check failed")
+            issues_found += 1
+    else:
+        console.print("  ❌ git not found in PATH")
+        issues_found += 1
+    
+    # 7. Check uv (package manager)
+    console.print("\n[bold]7. uv Package Manager[/bold]")
+    if command_exists("uv"):
+        ret, stdout, _ = run("uv --version", capture=True, quiet=True)
+        if ret == 0:
+            console.print(f"  ✅ {stdout.strip()}")
+        else:
+            console.print("  ⚠️  uv found but version check failed")
+            warnings_found += 1
+    else:
+        console.print("  ⚠️  uv not found (recommended for Python projects)")
+        warnings_found += 1
+    
+    # 8. Check project-specific tools if path provided
+    if path:
+        project_path = Path(path).expanduser().resolve()
+        if project_path.is_dir():
+            console.print(f"\n[bold]8. Project-Specific Checks ({project_path.name})[/bold]")
+            
+            # Check for config files
+            config_files = list(project_path.glob("configs/*.json"))
+            if config_files:
+                console.print(f"  ✅ Found {len(config_files)} config files")
+            else:
+                console.print("  ⚠️  No config files found in configs/")
+                warnings_found += 1
+            
+            # Check for prompt files
+            prompt_files = list(project_path.glob("prompts/*.txt"))
+            if prompt_files:
+                console.print(f"  ✅ Found {len(prompt_files)} prompt files")
+            else:
+                console.print("  ⚠️  No prompt files found in prompts/")
+                warnings_found += 1
+            
+            # Try to detect project type and check tools
+            if (project_path / "package.json").exists():
+                console.print("  📦 Detected Node.js project")
+                for tool in ["node", "npm", "bun"]:
+                    if command_exists(tool):
+                        console.print(f"     ✅ {tool} available")
+                    else:
+                        console.print(f"     ⚠️  {tool} not found")
+                        warnings_found += 1
+            
+            if (project_path / "pyproject.toml").exists():
+                console.print("  🐍 Detected Python project")
+                for tool in ["python3", "mypy", "ruff"]:
+                    if command_exists(tool):
+                        console.print(f"     ✅ {tool} available")
+                    else:
+                        console.print(f"     ⚠️  {tool} not found")
+                        warnings_found += 1
+        else:
+            console.print(f"\n[bold]8. Project Path[/bold]")
+            console.print(f"  ❌ Invalid project path: {path}")
+            issues_found += 1
+    
+    # 9. Check permissions
+    console.print("\n[bold]9. File Permissions[/bold]")
+    claude_dir = Path.home() / ".claude"
+    if claude_dir.exists():
+        # Check directory permissions
+        dir_perms = oct(claude_dir.stat().st_mode)[-3:]
+        if dir_perms in ("700", "755"):
+            console.print(f"  ✅ ~/.claude permissions: {dir_perms}")
+        else:
+            console.print(f"  ⚠️  ~/.claude permissions: {dir_perms} (expected 700)")
+            warnings_found += 1
+        
+        # Check settings.json permissions
+        settings_file = claude_dir / "settings.json"
+        if settings_file.exists():
+            file_perms = oct(settings_file.stat().st_mode)[-3:]
+            if file_perms == "600":
+                console.print(f"  ✅ settings.json permissions: {file_perms}")
+            else:
+                console.print(f"  ⚠️  settings.json permissions: {file_perms} (expected 600)")
+                warnings_found += 1
+    
+    # 10. Check for common issues
+    console.print("\n[bold]10. Common Issues Check[/bold]")
+    
+    # Check for stale lock files
+    lock_file = Path.home() / ".claude" / ".agent_farm_launch.lock"
+    if lock_file.exists():
+        age = time.time() - lock_file.stat().st_mtime
+        if age > 300:  # 5 minutes
+            console.print(f"  ⚠️  Stale lock file found ({age:.0f}s old)")
+            console.print("     Run: rm ~/.claude/.agent_farm_launch.lock")
+            warnings_found += 1
+        else:
+            console.print("  ✅ No stale lock files")
+    else:
+        console.print("  ✅ No lock files present")
+    
+    # Summary
+    console.print("\n" + "─" * 60)
+    if issues_found == 0 and warnings_found == 0:
+        console.print("\n[bold green]✅ All checks passed![/bold green]")
+        console.print("Your system is ready to run Claude Agent Farm.")
+    elif issues_found > 0:
+        console.print(f"\n[bold red]❌ Found {issues_found} critical issues and {warnings_found} warnings[/bold red]")
+        console.print("Please fix the critical issues before running the agent farm.")
+    else:
+        console.print(f"\n[bold yellow]⚠️  Found {warnings_found} warnings (no critical issues)[/bold yellow]")
+        console.print("The agent farm should work, but fixing warnings is recommended.")
+    
+    # Exit with appropriate code
+    if issues_found > 0:
+        raise typer.Exit(1)
+    elif warnings_found > 0:
+        raise typer.Exit(0)  # Warnings are not fatal
 
 
 if __name__ == "__main__":
