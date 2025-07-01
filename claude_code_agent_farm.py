@@ -542,6 +542,7 @@ class ClaudeAgentFarm:
         tmux_mouse: bool = True,
         fast_start: bool = False,
         full_backup: bool = False,
+        commit_every: Optional[int] = None,
     ):
         # Store all parameters
         self.path = path
@@ -564,9 +565,13 @@ class ClaudeAgentFarm:
         self.tmux_mouse = tmux_mouse
         self.fast_start = fast_start
         self.full_backup = full_backup
+        self.commit_every = commit_every
 
         # Initialize pane mapping
         self.pane_mapping: Dict[int, str] = {}
+        
+        # Track regeneration cycles for incremental commits
+        self.regeneration_cycles = 0
 
         # Validate session name (tmux has restrictions)
         if not re.match(r"^[a-zA-Z0-9_-]+$", self.session):
@@ -1058,8 +1063,58 @@ class ClaudeAgentFarm:
             remote = self.git_remote
             run(f"git push {remote} {branch}", check=False)
             console.print(f"[green]✓ Pushed commit with {count} current problems[/green]")
+            
+            # Display rich diff summary
+            self._display_commit_diff()
         except subprocess.CalledProcessError:
             console.print("[yellow]⚠ git commit/push skipped (no changes?)")
+
+    def _display_commit_diff(self) -> None:
+        """Display a rich diff summary of the last commit"""
+        try:
+            # Get diff stats for the last commit
+            _, stdout, _ = run("git diff --stat HEAD~1..HEAD", capture=True, quiet=True)
+            if not stdout.strip():
+                return
+            
+            # Create a rich panel with the diff information
+            console.print()  # Add space before
+            console.print(Panel(
+                stdout.strip(),
+                title="[bold cyan]📊 Commit Diff Summary[/bold cyan]",
+                border_style="cyan",
+                box=box.ROUNDED
+            ))
+            
+            # Get short summary of changes
+            _, stdout, _ = run("git diff --shortstat HEAD~1..HEAD", capture=True, quiet=True)
+            if stdout.strip():
+                console.print(f"[dim]{stdout.strip()}[/dim]")
+            
+            # Get list of changed files
+            _, stdout, _ = run("git diff --name-status HEAD~1..HEAD", capture=True, quiet=True)
+            if stdout.strip():
+                lines = stdout.strip().split('\n')
+                modified_count = sum(1 for line in lines if line.startswith('M'))
+                added_count = sum(1 for line in lines if line.startswith('A'))
+                deleted_count = sum(1 for line in lines if line.startswith('D'))
+                
+                summary_parts = []
+                if modified_count > 0:
+                    summary_parts.append(f"[yellow]{modified_count} modified[/yellow]")
+                if added_count > 0:
+                    summary_parts.append(f"[green]{added_count} added[/green]")
+                if deleted_count > 0:
+                    summary_parts.append(f"[red]{deleted_count} deleted[/red]")
+                
+                if summary_parts:
+                    console.print(f"Files: {', '.join(summary_parts)}")
+            
+            console.print()  # Add space after
+            
+        except Exception as e:
+            # Don't fail the whole operation if diff display fails
+            console.print(f"[dim]Could not display diff summary: {e}[/dim]")
 
     def _wait_for_shell_prompt(self, pane_target: str, timeout: int = 30, ignore_shutdown: bool = False) -> bool:
         """Wait for a shell prompt to appear in the pane
@@ -1276,6 +1331,22 @@ class ClaudeAgentFarm:
             # Launch monitor mode in controller pane
             monitor_cmd = f"cd {self.project_path} && {sys.executable} {script_path} monitor-only --path {self.project_path} --session {self.session}"
             tmux_send(f"{self.session}:controller", monitor_cmd)
+
+        # Set up context-reset macro binding
+        # Bind Ctrl+r in the controller window to send /reset to all agent panes
+        reset_cmd = ""
+        for agent_id in range(self.agents):
+            target_pane = self.pane_mapping.get(agent_id)
+            if target_pane is not None:
+                # Send /reset to each agent pane
+                reset_cmd += f"send-keys -t {target_pane} '/reset' Enter \\; "
+        
+        if reset_cmd:
+            # Remove the trailing " \; "
+            reset_cmd = reset_cmd[:-4]
+            # Bind to Ctrl+r in the controller window
+            run(f"tmux bind-key -T root -n C-r \\; display-message 'Sending /reset to all agents...' \\; {reset_cmd}", quiet=True)
+            console.print("[green]✓ Context-reset macro bound to Ctrl+R (broadcasts /reset to all agents)[/green]")
 
         # Register cleanup handler
         if not self._cleanup_registered:
@@ -1584,7 +1655,8 @@ class ClaudeAgentFarm:
 
         # Track successful launches to detect corruption patterns
         successful_launches = 0
-        corruption_detected = False
+        last_launch_ok = True  # Track if the previous launch was successful
+        current_stagger = self.stagger  # Start with base stagger time
 
         for i in range(self.agents):
             if not self.running:
@@ -1598,25 +1670,26 @@ class ClaudeAgentFarm:
                 time.sleep(1)  # Brief pause to let status update
                 prev_agent_status = self.monitor.agents[i]["status"]
                 if prev_agent_status == "error":
-                    corruption_detected = True
-                    console.print("[yellow]Detected potential config corruption - increasing launch delay[/yellow]")
+                    if last_launch_ok:
+                        # Previous launch was OK, but this one failed - double stagger
+                        current_stagger = min(current_stagger * 2, 60.0)  # Cap at 60 seconds
+                        console.print(f"[yellow]Launch failure detected - increasing stagger to {current_stagger}s[/yellow]")
+                    last_launch_ok = False
                 else:
                     successful_launches += 1
+                    if not last_launch_ok:
+                        # Previous launch failed, but this one succeeded - halve stagger
+                        current_stagger = max(current_stagger / 2, self.stagger)  # Don't go below base
+                        console.print(f"[green]Launch successful - reducing stagger to {current_stagger}s[/green]")
+                    last_launch_ok = True
 
             # Stagger starts to avoid config clobbering
             if i < self.agents - 1 and self.running:
-                # Dynamic stagger time based on corruption detection
-                if corruption_detected:
-                    # Use longer delay if we've seen errors
-                    stagger_time = self.stagger * 2.0
-                    console.print(f"[dim]Using extended stagger time: {stagger_time}s[/dim]")
-                else:
-                    # Gradually increase stagger time as we launch more agents
-                    # This helps prevent pile-up effects
-                    stagger_time = self.stagger * (1.0 + i * 0.1)
+                # Use current_stagger time which adapts based on success/failure
+                console.print(f"[dim]Using stagger time: {current_stagger}s[/dim]")
 
                 # Use smaller sleep intervals to be more responsive to shutdown
-                for _ in range(int(stagger_time * 5)):
+                for _ in range(int(current_stagger * 5)):
                     if not self.running:
                         break
                     time.sleep(0.2)
@@ -1671,6 +1744,21 @@ class ClaudeAgentFarm:
                             agent["restart_count"] += 1
                             agent["last_restart"] = datetime.now()
                             self.monitor.agents[agent_id] = agent
+                            
+                            # Track cycles for incremental commits
+                            if self.commit_every and agent["cycles"] > 0:
+                                # Check if all agents have completed at least one cycle
+                                all_cycles = [self.monitor.agents[i]["cycles"] for i in range(self.agents)]
+                                min_cycles = min(all_cycles) if all_cycles else 0
+                                
+                                # If we've completed N full cycles across all agents, commit
+                                if min_cycles > 0 and min_cycles % self.commit_every == 0 and min_cycles > self.regeneration_cycles:
+                                    console.print(f"[green]Completed {self.commit_every} regeneration cycles - committing changes[/green]")
+                                    self.regeneration_cycles = min_cycles
+                                    # Regenerate problems file to update progress
+                                    self.regenerate_problems()
+                                    # Commit and push
+                                    self.commit_and_push()
 
                 # Write state to file for monitor process
                 self.write_monitor_state()
@@ -1685,13 +1773,17 @@ class ClaudeAgentFarm:
         # Wrap long project paths for better display
         wrapped_path = textwrap.fill(str(self.project_path), width=60, subsequent_indent="         ")
         
+        banner_text = "[bold cyan]Claude Code Agent Farm[/bold cyan]\n"
+        banner_text += f"Project: {wrapped_path}\n"
+        banner_text += f"Agents: {self.agents}\n"
+        banner_text += f"Session: {self.session}\n"
+        banner_text += f"Auto-restart: {'enabled' if self.auto_restart else 'disabled'}"
+        if self.commit_every:
+            banner_text += f"\nIncremental commits: every {self.commit_every} cycles"
+        
         console.print(
             Panel.fit(
-                f"[bold cyan]Claude Code Agent Farm[/bold cyan]\n"
-                f"Project: {wrapped_path}\n"
-                f"Agents: {self.agents}\n"
-                f"Session: {self.session}\n"
-                f"Auto-restart: {'enabled' if self.auto_restart else 'disabled'}",
+                banner_text,
                 border_style="cyan",
                 box=box.DOUBLE,  # Use double-line box for main banner
             )
@@ -1904,6 +1996,9 @@ def main(
     full_backup: bool = typer.Option(
         False, "--full-backup", help="Perform a full backup before starting", rich_help_panel="Advanced Options"
     ),
+    commit_every: Optional[int] = typer.Option(
+        None, "--commit-every", help="Commit after every N regeneration cycles", rich_help_panel="Advanced Options"
+    ),
 ) -> None:
     """
     Claude Code Agent Farm - Parallel code fixing automation
@@ -1953,6 +2048,7 @@ def main(
         tmux_mouse=tmux_mouse,
         fast_start=fast_start,
         full_backup=full_backup,
+        commit_every=commit_every,
     )
 
     try:

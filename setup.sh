@@ -220,14 +220,37 @@ check_cc_status() {
     fi
     
     if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
-        if grep -q "alias cc=.*ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions" "$shell_rc" 2>/dev/null; then
-            cc_type="claude_correct"
-            echo "$cc_type"
-            return
-        elif grep -q "alias cc=" "$shell_rc" 2>/dev/null; then
-            cc_type="alias_other"
-            echo "$cc_type"
-            return
+        # Extract all cc alias lines for detailed checking
+        local cc_alias_lines=$(grep "^[[:space:]]*alias cc=" "$shell_rc" 2>/dev/null || true)
+        
+        if [ -n "$cc_alias_lines" ]; then
+            # Check for correct alias with proper quoting
+            if echo "$cc_alias_lines" | grep -q 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"'; then
+                cc_type="claude_correct"
+                echo "$cc_type"
+                return
+            # Check for common mis-quotings
+            elif echo "$cc_alias_lines" | grep -q "alias cc='ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions'"; then
+                cc_type="claude_wrong_quotes"
+                echo "$cc_type"
+                return
+            elif echo "$cc_alias_lines" | grep -q 'alias cc=ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions'; then
+                cc_type="claude_no_quotes"
+                echo "$cc_type"
+                return
+            elif echo "$cc_alias_lines" | grep -q "alias cc=\"ENABLE_BACKGROUND_TASKS=1 claude\""; then
+                cc_type="claude_missing_flags"
+                echo "$cc_type"
+                return
+            elif echo "$cc_alias_lines" | grep -q "ENABLE_BACKGROUND_TASKS=1.*claude"; then
+                cc_type="claude_malformed"
+                echo "$cc_type"
+                return
+            else
+                cc_type="alias_other"
+                echo "$cc_type"
+                return
+            fi
         fi
     fi
     
@@ -263,6 +286,57 @@ configure_cc_alias() {
             print_success "The 'cc' alias is already correctly configured for Claude Code"
             return 0
             ;;
+        "claude_wrong_quotes")
+            print_warning "The 'cc' alias exists but uses single quotes instead of double quotes"
+            echo "This prevents the ENABLE_BACKGROUND_TASKS variable from being set properly."
+            if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+                current_alias=$(grep "^[[:space:]]*alias cc=" "$shell_rc" | head -1)
+                echo "Current alias: $current_alias"
+                echo "Correct alias: $alias_cmd"
+            fi
+            if ! prompt_yes_no "Do you want to fix the quoting?"; then
+                print_warning "Keeping incorrect alias. The agent farm may not work properly."
+                return 1
+            fi
+            ;;
+        "claude_no_quotes")
+            print_warning "The 'cc' alias exists but is missing quotes entirely"
+            echo "This will cause issues with the command parsing."
+            if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+                current_alias=$(grep "^[[:space:]]*alias cc=" "$shell_rc" | head -1)
+                echo "Current alias: $current_alias"
+                echo "Correct alias: $alias_cmd"
+            fi
+            if ! prompt_yes_no "Do you want to fix the alias?"; then
+                print_warning "Keeping incorrect alias. The agent farm will not work properly."
+                return 1
+            fi
+            ;;
+        "claude_missing_flags")
+            print_warning "The 'cc' alias exists but is missing the --dangerously-skip-permissions flag"
+            echo "This flag is required for the agent farm to function."
+            if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+                current_alias=$(grep "^[[:space:]]*alias cc=" "$shell_rc" | head -1)
+                echo "Current alias: $current_alias"
+                echo "Correct alias: $alias_cmd"
+            fi
+            if ! prompt_yes_no "Do you want to add the missing flag?"; then
+                print_warning "Keeping incomplete alias. The agent farm will not work properly."
+                return 1
+            fi
+            ;;
+        "claude_malformed")
+            print_warning "The 'cc' alias exists but appears to be malformed"
+            if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+                current_alias=$(grep "^[[:space:]]*alias cc=" "$shell_rc" | head -1)
+                echo "Current alias: $current_alias"
+                echo "Correct alias: $alias_cmd"
+            fi
+            if ! prompt_yes_no "Do you want to fix it?"; then
+                print_warning "Keeping malformed alias. The agent farm will not work properly."
+                return 1
+            fi
+            ;;
         "c_compiler")
             print_warning "The 'cc' command is currently the C compiler"
             echo "Setting the cc alias for Claude Code will shadow the C compiler command."
@@ -275,7 +349,7 @@ configure_cc_alias() {
         "alias_other")
             print_warning "The 'cc' alias already exists but points to something else"
             if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
-                current_alias=$(grep "^alias cc=" "$shell_rc" | head -1)
+                current_alias=$(grep "^[[:space:]]*alias cc=" "$shell_rc" | head -1)
                 echo "Current alias in $shell_rc: $current_alias"
             fi
             if ! prompt_yes_no "Do you want to update it to Claude Code?"; then
@@ -311,27 +385,39 @@ configure_cc_alias() {
         return
     fi
     
-    if prompt_yes_no "Do you want to add this alias to your $shell_rc file?"; then
-        # Check if alias already exists
-        if grep -q "alias cc=" "$shell_rc" 2>/dev/null; then
+    # For certain statuses, we should always update the rc file
+    local should_update_rc=false
+    case "$cc_status" in
+        "claude_wrong_quotes"|"claude_no_quotes"|"claude_missing_flags"|"claude_malformed")
+            should_update_rc=true
+            print_status "Fixing the cc alias in $shell_rc..."
+            ;;
+        *)
+            if prompt_yes_no "Do you want to add this alias to your $shell_rc file?"; then
+                should_update_rc=true
+            fi
+            ;;
+    esac
+    
+    if [ "$should_update_rc" = true ]; then
+        # Check if any cc alias exists (including malformed ones)
+        if grep -q "^[[:space:]]*alias cc=" "$shell_rc" 2>/dev/null; then
             # Create backup before modification
-            cp "$shell_rc" "$shell_rc.backup.$(date +%Y%m%d_%H%M%S)"
-            print_success "Created backup at $shell_rc.backup.$(date +%Y%m%d_%H%M%S)"
+            local backup_file="$shell_rc.backup.$(date +%Y%m%d_%H%M%S)"
+            cp "$shell_rc" "$backup_file"
+            print_success "Created backup at $backup_file"
             
-            # Comment out old alias (keeping the backup)
-            sed -i.bak 's/^alias cc=/#&/' "$shell_rc"
+            # Use more robust sed to handle all variations of the alias
+            # This will comment out ANY line starting with optional whitespace followed by "alias cc="
+            sed -i.bak 's/^[[:space:]]*alias cc=/#&/' "$shell_rc"
             print_warning "Previous cc alias has been commented out"
         fi
         
-        # Add new alias if not already present
-        if ! grep -q "ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions" "$shell_rc" 2>/dev/null; then
-            echo "" >> "$shell_rc"
-            echo "# Claude Code alias for agent farm" >> "$shell_rc"
-            echo "$alias_cmd" >> "$shell_rc"
-            print_success "Added cc alias to $shell_rc"
-        else
-            print_success "Claude Code alias already in $shell_rc"
-        fi
+        # Add new alias
+        echo "" >> "$shell_rc"
+        echo "# Claude Code alias for agent farm" >> "$shell_rc"
+        echo "$alias_cmd" >> "$shell_rc"
+        print_success "Added correct cc alias to $shell_rc"
         
         echo ""
         print_warning "You'll need to reload your shell or run: source $shell_rc"

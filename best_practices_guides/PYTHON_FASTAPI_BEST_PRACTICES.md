@@ -1267,16 +1267,38 @@ incremental = true
 sqlite_cache = true
 ```
 
-**Custom type stubs** for untyped libraries:
+**Find and use type stub libraries where available!**
 
-```python
-# typings/some_untyped_lib.pyi
-from typing import Any, Awaitable
+For many popular libraries, there are already community provided type stub libraries available from PyPi for projects that don't yet provide types directly in the library itself. Here is a sampling of some of these:
 
-class UnTypedClient:
-    async def fetch(self, url: str) -> dict[str, Any]: ...
-    def sync_fetch(self, url: str) -> dict[str, Any]: ...
 ```
+    "asyncpg-stubs >=0",
+    "elasticsearch-stubs",
+    "pandas-stubs>=2.2.3.250527",
+    "sqlalchemy2-stubs >=0",
+    "types-aiofiles>=24.1.0.20250606",
+    "types-beautifulsoup4>=4.12.0",
+    "types-cachetools>=6.0.0.20250525",
+    "types-lxml>=2024.8.7",
+    "types-openpyxl>=3.1.5",
+    "types-passlib>=1.7.7",
+    "types-psutil>=7.0.0",
+    "types-python-dateutil>=2.9.0.20250516",
+    "types-python-jose>=3.5.0.20250531",
+    "types-pyyaml>=6.0.12.20250516",
+    "types-pytz>0",
+    "types-redis>=4.6.0.20241004",
+    "types-reportlab",
+    "types-requests>=2.32.4.20250611",
+    "types-setuptools>=80.9.0.20250529",
+    "types-sqlalchemy>=1.4.53.38",
+    "types-tabulate>=0.9.0",
+    "types-termcolor",
+    "types-tqdm>=4.67.0",
+```
+
+Wherever it is relevant and such libraries exist (you always need to search online to verify that a proposed library actually is available under that exact name in PyPi!), you should use them rather than try to create your own ad-hoc, incomplete type specifications.
+
 
 ## Ruff 2025 Style Guide Updates
 
