@@ -17,12 +17,14 @@ Claude Code Agent Farm is a powerful orchestration framework that runs multiple 
 - 🤝 **Agent Coordination**: Advanced lock-based system prevents conflicts between parallel agents
 - 🌐 **Multi-Stack Support**: 34 technology stacks including Next.js, Python, Rust, Go, Java, Angular, Flutter, C++, and more
 - 📊 **Smart Monitoring**: Real-time dashboard with context warnings, heartbeat tracking, and tmux pane titles
-- 🔄 **Auto-Recovery**: Automatically restarts agents when needed
-- 📈 **Progress Tracking**: Git commits and structured progress documents
+- 🔄 **Auto-Recovery**: Automatically restarts agents when needed with adaptive idle timeout based on work patterns
+- 📈 **Progress Tracking**: Git commits with rich diff summaries and comprehensive HTML run reports
+- 🔄 **Context Management**: One-key broadcast of /reset command to all agents (Ctrl+R)
 - ⚙️ **Highly Configurable**: JSON configs with variable substitution and dynamic chunk sizing
-- 🖥️ **Flexible Viewing**: Multiple tmux viewing modes
-- 🔒 **Safe Operation**: Automatic settings backup/restore, file locking, atomic operations
+- 🖥️ **Flexible Viewing**: Multiple tmux viewing modes with shell completion support
+- 🔒 **Safe Operation**: Automatic settings backup/restore with size-based rotation, file locking, atomic operations
 - 🛠️ **Development Setup**: 24 integrated tool installation scripts and pre-flight verification
+- 🎯 **Smart Controls**: Graceful shutdown with force-kill on double Ctrl+C within 3 seconds
 
 ## 📋 Prerequisites
 
@@ -59,7 +61,8 @@ The setup script will:
 - Check and install missing prerequisites
 - Create a Python 3.13 virtual environment
 - Install all dependencies
-- Configure the `cc` alias
+- Configure the `cc` alias with automatic detection and fixing of common mis-quotings
+- Validate existing aliases and patch incorrect quote patterns
 - Set up direnv for automatic environment activation
 - Handle both bash and zsh shells automatically
 
@@ -78,7 +81,21 @@ This command checks:
 - Project-specific tool availability
 - File permissions and common issues
 
-### 3. Choose Your Workflow
+### 3. Enable Shell Completion (Optional)
+
+For faster command entry with tab completion:
+
+```bash
+# Auto-detect shell and install completion
+claude-code-agent-farm install-completion
+
+# Or specify shell explicitly
+claude-code-agent-farm install-completion --shell bash
+claude-code-agent-farm install-completion --shell zsh
+claude-code-agent-farm install-completion --shell fish
+```
+
+### 4. Choose Your Workflow
 
 #### For Bug Fixing (Traditional)
 ```bash
@@ -504,6 +521,7 @@ Advanced:
   --context-threshold N    Restart agent when context ≤ N% (default: 20)
   --idle-timeout SECONDS   Mark agent idle after N seconds (default: 60)
   --max-errors N           Disable agent after N errors (default: 3)
+  --commit-every N         Commit after every N regeneration cycles
   --tmux-kill-on-exit      Kill tmux session on exit (default: true)
   --no-tmux-kill-on-exit   Keep tmux session running after exit
   --tmux-mouse             Enable tmux mouse support (default: true)
@@ -593,7 +611,7 @@ Work on approximately {chunk_size} improvements at a time...
 2. **Agent Launch**: Starts N agents in tmux panes
 3. **Task Distribution**: Each agent selects random problem chunks
 4. **Conflict Prevention**: Marks completed problems with [COMPLETED]
-5. **Progress Tracking**: Commits changes and tracks error reduction
+5. **Progress Tracking**: Commits changes with rich diff summaries showing file counts and change statistics
 
 ### Best Practices Workflow
 
@@ -606,9 +624,11 @@ Work on approximately {chunk_size} improvements at a time...
 ### Safety Features
 
 1. **Settings Backup**: Automatically backs up Claude settings before starting
-   - Creates timestamped backups in `~/.claude/backups/`
+   - Creates timestamped backups in `.claude_agent_farm_backups/` in your project
    - Keeps last 10 backups with automatic rotation
+   - Enforces 200MB total size limit to prevent disk bloat
    - Full backup option with `--full-backup` flag
+   - Reports backup storage status after cleanup
 2. **Settings Restore**: Restores from backup if corruption detected
    - Automatic detection of settings errors
    - Seamless restoration during agent startup
@@ -626,9 +646,10 @@ Work on approximately {chunk_size} improvements at a time...
    - Removes lock files
    - Deletes state files
 7. **Launch Locking**: Prevents concurrent Claude launches with lock files
-8. **Dynamic Stagger**: Adjusts launch delays based on error detection
-   - Doubles stagger time when corruption detected
-   - Gradual increase based on agent count
+8. **Adaptive Stagger**: Intelligent launch delays based on success/failure
+   - Halves stagger time when previous launch succeeds (faster startup when healthy)
+   - Doubles stagger time only when previous launch fails (retains safety)
+   - Capped at 60 seconds maximum to prevent excessive delays
 9. **Agent Limits**: Enforces max_agents limit (default: 50)
 10. **Instance Randomization**: Adds unique seeds to each agent for better work distribution
 
@@ -677,6 +698,10 @@ tmux attach -t claude_agents
 tmux attach -t claude_agents:controller  # Dashboard only
 ```
 
+### Context Reset Macro
+
+Press `Ctrl+R` from any tmux window to broadcast the `/reset` command to all agents simultaneously. This frees up context across all agents with a single keystroke, useful when multiple agents are running low on context.
+
 ### Agent States
 
 - 🟡 **starting** - Agent initializing
@@ -692,6 +717,11 @@ When `--auto-restart` is enabled:
 - Monitors agent health continuously via heartbeat files
 - Restarts agents that hit errors, go idle, or have stale heartbeats (>2 minutes)
 - Monitors context percentage and restarts when below threshold
+- Adaptive idle timeout adjusts based on agent work patterns
+  - Tracks cycle completion times across all agents
+  - Sets timeout to 3× median cycle time (bounded 30s-600s)
+  - Prevents false positives on complex tasks
+  - Speeds up detection on simple tasks
 - Implements exponential backoff to prevent restart loops
   - Initial wait: 10 seconds
   - Doubles with each restart (max 5 minutes)
@@ -729,6 +759,24 @@ Structure:
 
 External tools can read this file to monitor the farm's progress.
 
+### HTML Run Reports
+
+At the end of each run, the system generates a comprehensive HTML report with:
+
+- **Run Summary**: Duration, agents used, problems fixed, commits made
+- **Agent Performance**: Individual agent statistics including cycles, context usage, errors, and restarts
+- **Configuration Details**: All settings used for the run
+- **Visual Formatting**: Rich HTML output with syntax highlighting and dark theme
+
+Reports are saved as `agent_farm_report_YYYYMMDD_HHMMSS.html` in the project directory.
+
+Features:
+- Single-file HTML with inline styles (no external dependencies)
+- Professional dark theme optimized for code review
+- Sortable tables with color-coded status indicators
+- Complete run statistics for documentation or pull requests
+- Automatic generation on graceful shutdown
+
 ## 💡 Usage Examples
 
 ### Quick Test Run
@@ -754,6 +802,17 @@ claude-code-agent-farm \
   --path /nextjs/project \
   --config configs/nextjs_best_practices_config.json \
   --agents 10
+```
+
+### Incremental Commits
+```bash
+# Commit progress every 5 cycles
+claude-code-agent-farm \
+  --path /project \
+  --config configs/python_config.json \
+  --agents 20 \
+  --commit-every 5 \
+  --auto-restart
 ```
 
 ### Custom Configuration
@@ -840,9 +899,12 @@ claude-code-agent-farm \
 - **State File**: Check `.claude_agent_farm_state.json` for agent status
 - **Heartbeat Files**: Monitor `.heartbeats/agent*.heartbeat` for activity tracking
 - **Lock Files**: Look for `.agent_farm_launch.lock` in `~/.claude/`
-- **Backup Directory**: `~/.claude/backups/` contains settings backups
+- **Backup Directory**: `.claude_agent_farm_backups/` in project contains settings backups
 - **Pre-flight Check**: Run `claude-code-agent-farm doctor` to diagnose issues
 - **Emergency Cleanup**: Ctrl+C triggers graceful shutdown
+  - First Ctrl+C: Graceful shutdown with agent cleanup
+  - Second Ctrl+C within 3 seconds: Force kills tmux session
+  - Automatically cleans up state files and locks
 - **Manual tmux**: `tmux kill-session -t claude_agents` to force cleanup
 
 ## 📁 Project Structure
@@ -965,9 +1027,11 @@ Configure custom git branches and remotes in your config:
   - Base sizes by stack: Python (50), Next.js (50), Rust (30), Go (40), Java (35)
   - Dynamic formula: `max(10, total_lines / agents / 2)`
   - Prevents agents from running out of work or doing trivial tasks
-- **Stagger Time**: Increase for many agents or slow systems
-  - Default 10s prevents settings corruption
-  - Automatically doubles on error detection
+- **Stagger Time**: Adaptive timing based on launch success
+  - Default 10s baseline prevents settings corruption
+  - Automatically halves when previous launch succeeds (minimum: baseline)
+  - Doubles only when previous launch fails (maximum: 60s)
+  - Results in faster startup when system is healthy
 - **Context Threshold**: Lower values (15-20%) restart agents sooner
   - Visual warnings appear in tmux pane titles
 - **Idle Timeout**: Adjust based on task complexity
@@ -976,6 +1040,9 @@ Configure custom git branches and remotes in your config:
 - **Max Agents**: Increase beyond 50 for powerful systems
 - **Wait After CC**: Default 15s ensures Claude is fully ready
   - Increase if seeing startup failures
+- **Incremental Commits**: Use `--commit-every N` to commit progress periodically
+  - Prevents giant diffs that are hard to review
+  - Tracks minimum cycles across all agents for consistency
 
 ### Advanced Features
 
@@ -1063,9 +1130,10 @@ MIT License - see [LICENSE](LICENSE) file
 - Git commit history for tracking improvements
 
 ### Recovery Options
-- Manual settings restore from `~/.claude/backups/`
+- Manual settings restore from `.claude_agent_farm_backups/` in your project
 - Lock file cleanup: `rm ~/.claude/.agent_farm_launch.lock`
 - Emergency session cleanup: `tmux kill-session -t claude_agents`
+- View HTML run reports from previous sessions for debugging
 
 ### Performance Optimization
 - Use SSDs for better file I/O performance

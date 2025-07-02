@@ -208,8 +208,13 @@ class AgentMonitor:
         self.start_time = datetime.now()
         self.context_threshold = context_threshold
         self.idle_timeout = idle_timeout
+        self.base_idle_timeout = idle_timeout  # Keep original value as base
         self.max_errors = max_errors
         self.project_path = project_path
+        
+        # Cycle time tracking for adaptive timeout
+        self.cycle_times: List[float] = []
+        self.max_cycle_history = 20  # Keep last 20 cycle times
         
         # Setup heartbeats directory
         self.heartbeats_dir: Optional[Path] = None
@@ -232,8 +237,35 @@ class AgentMonitor:
                 "restart_count": 0,
                 "last_restart": None,
                 "last_heartbeat": None,
+                "cycle_start_time": None,
             }
 
+    def calculate_adaptive_timeout(self) -> int:
+        """Calculate adaptive idle timeout based on median cycle time"""
+        if len(self.cycle_times) < 3:
+            # Not enough data, use base timeout
+            return self.base_idle_timeout
+        
+        # Calculate median cycle time
+        sorted_times = sorted(self.cycle_times)
+        median_time = sorted_times[len(sorted_times) // 2]
+        
+        # Set timeout to 3x median cycle time, but within reasonable bounds
+        adaptive_timeout = int(median_time * 3)
+        
+        # Enforce minimum and maximum bounds
+        min_timeout = 30  # At least 30 seconds
+        max_timeout = 600  # At most 10 minutes
+        
+        adaptive_timeout = max(min_timeout, min(adaptive_timeout, max_timeout))
+        
+        # Only update if significantly different from current (>20% change)
+        if abs(adaptive_timeout - self.idle_timeout) / self.idle_timeout > 0.2:
+            console.print(f"[dim]Adjusting idle timeout: {self.idle_timeout}s → {adaptive_timeout}s (median cycle: {median_time:.1f}s)[/dim]")
+            self.idle_timeout = adaptive_timeout
+        
+        return self.idle_timeout
+    
     def detect_context_percentage(self, content: str) -> Optional[int]:
         """Extract context percentage from pane content"""
         # Try multiple patterns for robustness
@@ -358,13 +390,38 @@ class AgentMonitor:
             agent["status"] = "error"
             agent["errors"] += 1
         else:
+            # Store previous status to detect transitions
+            prev_status = agent.get("status", "unknown")
+            
             # Update status based on activity
             if self.is_claude_working(content):
+                # If transitioning to working, record cycle start time
+                if prev_status != "working" and agent["cycle_start_time"] is None:
+                    agent["cycle_start_time"] = datetime.now()
+                
                 agent["status"] = "working"
                 agent["last_activity"] = datetime.now()
                 # Update heartbeat when agent is actively working
                 self._update_heartbeat(agent_id)
             elif self.is_claude_ready(content):
+                # If transitioning from working to ready, record cycle time
+                if prev_status == "working" and agent["cycle_start_time"] is not None:
+                    cycle_time = (datetime.now() - agent["cycle_start_time"]).total_seconds()
+                    self.cycle_times.append(cycle_time)
+                    
+                    # Keep only recent cycle times
+                    if len(self.cycle_times) > self.max_cycle_history:
+                        self.cycle_times.pop(0)
+                    
+                    # Update adaptive timeout
+                    self.calculate_adaptive_timeout()
+                    
+                    # Reset cycle start time
+                    agent["cycle_start_time"] = None
+                    
+                    # Increment cycle count
+                    agent["cycles"] += 1
+                
                 # Check if idle for too long
                 idle_time = (datetime.now() - agent["last_activity"]).total_seconds()
                 if idle_time > self.idle_timeout:
@@ -572,6 +629,12 @@ class ClaudeAgentFarm:
         
         # Track regeneration cycles for incremental commits
         self.regeneration_cycles = 0
+        
+        # Track run statistics for reporting
+        self.run_start_time = datetime.now()
+        self.total_problems_fixed = 0
+        self.total_commits_made = 0
+        self.agent_restart_count = 0
 
         # Validate session name (tmux has restrictions)
         if not re.match(r"^[a-zA-Z0-9_-]+$", self.session):
@@ -600,6 +663,10 @@ class ClaudeAgentFarm:
         self.git_remote: str = getattr(self, "git_remote", "origin")
         self._cleanup_registered = False
         self.state_file = self.project_path / MONITOR_STATE_FILE
+        
+        # Signal handling for double Ctrl-C
+        self._last_sigint_time: Optional[float] = None
+        self._force_kill_threshold = 3.0  # seconds
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -616,11 +683,42 @@ class ClaudeAgentFarm:
                     setattr(self, key, value)
 
     def _signal_handler(self, sig: Any, frame: Any) -> None:
-        """Handle shutdown signals gracefully"""
-        if not self.shutting_down:
-            self.shutting_down = True
-            console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...[/yellow]")
-            self.running = False
+        """Handle shutdown signals gracefully with force-kill on double tap"""
+        current_time = time.time()
+        
+        # Check if this is a SIGINT (Ctrl-C)
+        if sig == signal.SIGINT:
+            # Check for double tap
+            if self._last_sigint_time and (current_time - self._last_sigint_time) < self._force_kill_threshold:
+                # Second Ctrl-C within threshold - force kill
+                console.print("\n[red]Force killing tmux session...[/red]")
+                with contextlib.suppress(Exception):
+                    run(f"tmux kill-session -t {self.session}", check=False, quiet=True)
+                # Clean up state files
+                try:
+                    if hasattr(self, "state_file") and self.state_file.exists():
+                        self.state_file.unlink()
+                    lock_file = Path.home() / ".claude" / ".agent_farm_launch.lock"
+                    if lock_file.exists():
+                        lock_file.unlink()
+                except Exception:
+                    pass
+                # Force exit
+                os._exit(1)
+            else:
+                # First Ctrl-C or outside threshold
+                self._last_sigint_time = current_time
+                if not self.shutting_down:
+                    self.shutting_down = True
+                    console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...[/yellow]")
+                    console.print("[dim]Press Ctrl-C again within 3 seconds to force kill[/dim]")
+                    self.running = False
+        else:
+            # Other signals (SIGTERM, etc.) - normal graceful shutdown
+            if not self.shutting_down:
+                self.shutting_down = True
+                console.print("\n[yellow]Received termination signal. Shutting down gracefully...[/yellow]")
+                self.running = False
 
     def _backup_claude_settings(self) -> Optional[str]:
         """Backup essential Claude Code settings (excluding large caches)"""
@@ -708,16 +806,45 @@ class ClaudeAgentFarm:
             console.print(f"[red]Error: Could not backup Claude directory: {e}[/red]")
             return None
 
-    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10) -> None:
-        """Remove old backups, keeping only the most recent ones"""
+    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10, max_total_mb: int = 200) -> None:
+        """Remove old backups, keeping only the most recent ones and enforcing size limit"""
         try:
             # Find all backup files (both essential and full)
             backups = sorted(backup_dir.glob("claude_backup_*.tar.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
             
-            if len(backups) > keep_count:
-                for old_backup in backups[keep_count:]:
-                    old_backup.unlink()
-                    console.print(f"[dim]Removed old backup: {old_backup.name}[/dim]")
+            # Calculate total size and remove old backups based on both count and size limits
+            total_size_bytes = 0
+            max_size_bytes = max_total_mb * 1024 * 1024
+            
+            backups_to_keep = []
+            backups_to_remove = []
+            
+            for i, backup in enumerate(backups):
+                backup_size = backup.stat().st_size
+                
+                # Keep backup if we're under both the count limit and size limit
+                if i < keep_count and total_size_bytes + backup_size <= max_size_bytes:
+                    total_size_bytes += backup_size
+                    backups_to_keep.append(backup)
+                else:
+                    backups_to_remove.append(backup)
+            
+            # Always keep at least the most recent backup
+            if not backups_to_keep and backups:
+                backups_to_keep.append(backups[0])
+                backups_to_remove = backups[1:]
+            
+            # Remove old backups
+            for old_backup in backups_to_remove:
+                size_mb = old_backup.stat().st_size / (1024 * 1024)
+                old_backup.unlink()
+                console.print(f"[dim]Removed old backup: {old_backup.name} ({size_mb:.1f} MB)[/dim]")
+            
+            # Report current backup storage status
+            if backups_to_keep:
+                total_mb = total_size_bytes / (1024 * 1024)
+                console.print(f"[dim]Backup storage: {len(backups_to_keep)} files, {total_mb:.1f} MB total[/dim]")
+                
         except Exception as e:
             console.print(f"[yellow]Warning: Could not clean up old backups: {e}[/yellow]")
 
@@ -935,66 +1062,79 @@ class ClaudeAgentFarm:
             os.chdir(self.project_path)
 
             # Use a proper temporary file to avoid conflicts
-            with tempfile.NamedTemporaryFile(
-                mode="w", dir=self.project_path, prefix="combined_", suffix=".tmp", delete=False
-            ) as tmpfile:
-                tmpfile_path = Path(tmpfile.name)
-
-                # Run type-check
-                type_check_cmd = commands.get('type_check')
-                if type_check_cmd:
-                    tmpfile.write(f"$ {' '.join(type_check_cmd)}\n")
-                    tmpfile.flush()
-
-                    # Check if we should continue
-                    if not self.running:
-                        tmpfile_path.unlink(missing_ok=True)
-                        raise KeyboardInterrupt()
-
-                    result = subprocess.run(
-                        type_check_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path
-                    )
-                    # Ensure all output is written to disk
-                    tmpfile.flush()
-                    os.fsync(tmpfile.fileno())
-                    
-                    # Small delay to ensure process cleanup
-                    time.sleep(0.5)
-
-                # Run lint
-                lint_cmd = commands.get('lint')
-                if lint_cmd:
-                    if type_check_cmd:  # Add spacing if we ran type-check
-                        tmpfile.write("\n\n")
-                    tmpfile.write(f"$ {' '.join(lint_cmd)}\n")
-                    tmpfile.flush()
-
-                    # Check again before lint
-                    if not self.running:
-                        tmpfile_path.unlink(missing_ok=True)
-                        raise KeyboardInterrupt()
-
-                    result = subprocess.run(lint_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)  # noqa: F841
-                    # Ensure all output is written to disk
-                    tmpfile.flush()
-                    os.fsync(tmpfile.fileno())
-
-            # Atomic rename (handle cross-filesystem moves)
+            tmpfile_fd, tmpfile_name = tempfile.mkstemp(
+                dir=self.project_path, prefix="combined_", suffix=".tmp", text=True
+            )
+            tmpfile_path = Path(tmpfile_name)
+            
             try:
-                tmpfile_path.replace(self.combined_file)
-            except OSError:
-                # Fallback for cross-filesystem scenarios
-                import shutil
+                with os.fdopen(tmpfile_fd, 'w') as tmpfile:
+                    # Run type-check
+                    type_check_cmd = commands.get('type_check')
+                    if type_check_cmd:
+                        tmpfile.write(f"$ {' '.join(type_check_cmd)}\n")
+                        tmpfile.flush()
 
-                shutil.move(str(tmpfile_path), str(self.combined_file))
-            finally:
-                # Clean up temp file if it still exists
+                        # Check if we should continue
+                        if not self.running:
+                            raise KeyboardInterrupt()
+
+                        result = subprocess.run(
+                            type_check_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path
+                        )
+                        # Ensure all output is written to disk
+                        tmpfile.flush()
+                        os.fsync(tmpfile.fileno())
+                        
+                        # Small delay to ensure process cleanup
+                        time.sleep(0.5)
+
+                    # Run lint
+                    lint_cmd = commands.get('lint')
+                    if lint_cmd:
+                        if type_check_cmd:  # Add spacing if we ran type-check
+                            tmpfile.write("\n\n")
+                        tmpfile.write(f"$ {' '.join(lint_cmd)}\n")
+                        tmpfile.flush()
+
+                        # Check again before lint
+                        if not self.running:
+                            raise KeyboardInterrupt()
+
+                        result = subprocess.run(lint_cmd, stdout=tmpfile, stderr=subprocess.STDOUT, cwd=self.project_path)  # noqa: F841
+                        # Ensure all output is written to disk
+                        tmpfile.flush()
+                        os.fsync(tmpfile.fileno())
+                
+                # File is now closed, safe to move
+                # Atomic rename (handle cross-filesystem moves)
+                try:
+                    tmpfile_path.replace(self.combined_file)
+                except OSError:
+                    # Fallback for cross-filesystem scenarios
+                    import shutil
+
+                    shutil.move(str(tmpfile_path), str(self.combined_file))
+            except (KeyboardInterrupt, Exception):
+                # Clean up temp file on any error
                 tmpfile_path.unlink(missing_ok=True)
+                raise
 
             progress.update(task, completed=True)
 
+        # Count problems before and after
+        prev_count = getattr(self, '_last_problem_count', 0)
         count = line_count(self.combined_file)
         console.print(f"[green]✓ Generated {count} lines of problems[/green]")
+        
+        # Track problems fixed (decrease in count)
+        if prev_count > 0 and count < prev_count:
+            problems_fixed = prev_count - count
+            self.total_problems_fixed += problems_fixed
+            console.print(f"[green]✓ Fixed {problems_fixed} problems this cycle[/green]")
+        
+        # Store current count for next comparison
+        self._last_problem_count = count
 
     def commit_and_push(self) -> None:
         """Commit and push the updated problem count"""
@@ -1063,6 +1203,9 @@ class ClaudeAgentFarm:
             remote = self.git_remote
             run(f"git push {remote} {branch}", check=False)
             console.print(f"[green]✓ Pushed commit with {count} current problems[/green]")
+            
+            # Track commit for reporting
+            self.total_commits_made += 1
             
             # Display rich diff summary
             self._display_commit_diff()
@@ -1745,6 +1888,9 @@ class ClaudeAgentFarm:
                             agent["last_restart"] = datetime.now()
                             self.monitor.agents[agent_id] = agent
                             
+                            # Track restarts for reporting
+                            self.agent_restart_count += 1
+                            
                             # Track cycles for incremental commits
                             if self.commit_every and agent["cycles"] > 0:
                                 # Check if all agents have completed at least one cycle
@@ -1863,6 +2009,9 @@ class ClaudeAgentFarm:
                 # Directory not empty or other error
                 pass
 
+        # Generate HTML report before final cleanup
+        self.generate_html_report()
+        
         # Restore font size if we changed it
         if hasattr(self, "_zoom_adjusted") and self._zoom_adjusted:
             console.print("[dim]Note: You may want to restore zoom with Ctrl/Cmd + 0[/dim]")
@@ -1880,6 +2029,144 @@ class ClaudeAgentFarm:
             if lock_file.exists():
                 lock_file.unlink()
 
+    def generate_html_report(self) -> None:
+        """Generate single-file HTML run report with all statistics"""
+        try:
+            # Calculate run duration
+            run_duration = datetime.now() - self.run_start_time
+            hours, remainder = divmod(int(run_duration.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            duration_str = f"{hours}h {minutes}m {seconds}s"
+            
+            # Gather agent statistics if monitor is available
+            agent_stats = []
+            total_cycles = 0
+            if self.monitor:
+                for agent_id, agent in self.monitor.agents.items():
+                    agent_stats.append({
+                        "id": agent_id,
+                        "status": agent["status"],
+                        "cycles": agent["cycles"],
+                        "errors": agent["errors"],
+                        "restarts": agent["restart_count"],
+                        "context": agent["last_context"],
+                    })
+                    total_cycles += agent["cycles"]
+            
+            # Count initial problems
+            initial_problems = 0
+            if self.combined_file.exists():
+                initial_problems = line_count(self.combined_file)
+            
+            # Generate HTML using Rich's console
+            html_console = Console(record=True, width=120)
+            
+            # Title
+            html_console.print(Panel.fit(
+                f"[bold cyan]Claude Code Agent Farm - Run Report[/bold cyan]\n"
+                f"Project: {self.project_path.name}\n"
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                border_style="cyan"
+            ))
+            
+            # Summary statistics
+            html_console.print("\n[bold]Run Summary[/bold]")
+            summary_table = Table(box=box.ROUNDED)
+            summary_table.add_column("Metric", style="cyan")
+            summary_table.add_column("Value", style="green")
+            
+            summary_table.add_row("Duration", duration_str)
+            summary_table.add_row("Agents Used", str(self.agents))
+            summary_table.add_row("Total Cycles", str(total_cycles))
+            summary_table.add_row("Problems Fixed", str(self.total_problems_fixed))
+            summary_table.add_row("Commits Made", str(self.total_commits_made))
+            summary_table.add_row("Agent Restarts", str(self.agent_restart_count))
+            summary_table.add_row("Initial Problems", str(initial_problems))
+            remaining_problems = initial_problems - self.total_problems_fixed
+            summary_table.add_row("Remaining Problems", str(max(0, remaining_problems)))
+            
+            html_console.print(summary_table)
+            
+            # Agent details
+            if agent_stats:
+                html_console.print("\n[bold]Agent Performance[/bold]")
+                agent_table = Table(box=box.ROUNDED)
+                agent_table.add_column("Agent", style="cyan", width=10)
+                agent_table.add_column("Status", style="green", width=10)
+                agent_table.add_column("Cycles", style="yellow", width=8)
+                agent_table.add_column("Context %", style="magenta", width=10)
+                agent_table.add_column("Errors", style="red", width=8)
+                agent_table.add_column("Restarts", style="orange1", width=10)
+                
+                for agent in sorted(agent_stats, key=lambda x: x["id"]):
+                    status_color = {
+                        "working": "green",
+                        "ready": "cyan",
+                        "idle": "yellow",
+                        "error": "red",
+                        "starting": "yellow",
+                        "unknown": "dim"
+                    }.get(agent["status"], "white")
+                    
+                    agent_table.add_row(
+                        f"Agent {agent['id']:02d}",
+                        f"[{status_color}]{agent['status']}[/]",
+                        str(agent["cycles"]),
+                        f"{agent['context']}%",
+                        str(agent["errors"]),
+                        str(agent["restarts"])
+                    )
+                
+                html_console.print(agent_table)
+            
+            # Configuration used
+            html_console.print("\n[bold]Configuration[/bold]")
+            config_items = [
+                ("Tech Stack", getattr(self, 'tech_stack', 'unknown')),
+                ("Chunk Size", str(getattr(self, 'chunk_size', 50))),
+                ("Context Threshold", f"{self.context_threshold}%"),
+                ("Idle Timeout", f"{self.idle_timeout}s"),
+                ("Auto Restart", "Yes" if self.auto_restart else "No"),
+                ("Skip Regenerate", "Yes" if self.skip_regenerate else "No"),
+                ("Skip Commit", "Yes" if self.skip_commit else "No"),
+            ]
+            
+            for key, value in config_items:
+                html_console.print(f"  {key}: [cyan]{value}[/cyan]")
+            
+            # Save HTML report
+            report_file = self.project_path / f"agent_farm_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            html_content = html_console.export_html(inline_styles=True)
+            
+            # Add some custom CSS for better formatting
+            custom_css = """
+            <style>
+                body {
+                    font-family: 'Cascadia Code', 'Fira Code', monospace;
+                    background-color: #0d1117;
+                    color: #c9d1d9;
+                    padding: 20px;
+                    line-height: 1.6;
+                }
+                pre {
+                    background-color: #161b22;
+                    border: 1px solid #30363d;
+                    border-radius: 6px;
+                    padding: 16px;
+                    overflow-x: auto;
+                }
+            </style>
+            """
+            
+            # Insert custom CSS after <head>
+            html_content = html_content.replace("<head>", f"<head>{custom_css}")
+            
+            report_file.write_text(html_content)
+            console.print(f"\n[green]✓ Generated run report: {report_file.name}[/green]")
+            
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not generate HTML report: {e}[/yellow]")
+    
     def write_monitor_state(self) -> None:
         """Write current monitor state to shared file"""
         if not self.monitor:
@@ -1892,6 +2179,7 @@ class ClaudeAgentFarm:
                 "start_time": a["start_time"].isoformat(),
                 "last_activity": a["last_activity"].isoformat(),
                 "last_restart": a["last_restart"].isoformat() if a.get("last_restart") is not None else None,
+                "last_heartbeat": a["last_heartbeat"].isoformat() if a.get("last_heartbeat") is not None else None,
             }
 
         state_data = {
@@ -2388,6 +2676,147 @@ def doctor(
         raise typer.Exit(1)
     elif warnings_found > 0:
         raise typer.Exit(0)  # Warnings are not fatal
+
+
+@app.command()
+def install_completion(
+    shell: Optional[str] = typer.Option(None, help="Shell to install completion for. Auto-detected if not provided.")
+) -> None:
+    """Install shell completion for claude-code-agent-farm command"""
+    import platform
+    import subprocess
+    
+    # Auto-detect shell if not provided
+    if shell is None:
+        if platform.system() == "Windows":
+            console.print("[yellow]Shell completion is not supported on Windows[/yellow]")
+            raise typer.Exit(1)
+        
+        # Try to detect shell from environment
+        shell_env = os.environ.get("SHELL", "").lower()
+        if "bash" in shell_env:
+            shell = "bash"
+        elif "zsh" in shell_env:
+            shell = "zsh"
+        elif "fish" in shell_env:
+            shell = "fish"
+        else:
+            console.print("[yellow]Could not auto-detect shell. Please specify with --shell[/yellow]")
+            console.print("Supported shells: bash, zsh, fish")
+            raise typer.Exit(1)
+    
+    # Validate shell
+    shell = shell.lower()
+    if shell not in ["bash", "zsh", "fish"]:
+        console.print(f"[red]Unsupported shell: {shell}[/red]")
+        console.print("Supported shells: bash, zsh, fish")
+        raise typer.Exit(1)
+    
+    console.print(f"[bold]Installing completion for {shell}...[/bold]")
+    
+    try:
+        # Generate completion script
+        completion_script = subprocess.check_output(
+            ["claude-code-agent-farm", "--show-completion", shell],
+            text=True
+        )
+        
+        # Determine where to install
+        if shell == "bash":
+            # Try to install to bash-completion directory
+            completion_dirs = [
+                "/etc/bash_completion.d",
+                "/usr/local/etc/bash_completion.d",
+                f"{Path.home()}/.local/share/bash-completion/completions",
+            ]
+            
+            installed = False
+            for comp_dir in completion_dirs:
+                comp_path = Path(comp_dir)
+                if comp_path.exists() and os.access(comp_path, os.W_OK):
+                    comp_file = comp_path / "claude-code-agent-farm"
+                    comp_file.write_text(completion_script)
+                    console.print(f"[green]✓ Installed completion to {comp_file}[/green]")
+                    installed = True
+                    break
+            
+            if not installed:
+                # Fall back to .bashrc
+                bashrc = Path.home() / ".bashrc"
+                if bashrc.exists():
+                    # Check if already installed
+                    bashrc_content = bashrc.read_text()
+                    if "claude-code-agent-farm completion" not in bashrc_content:
+                        with bashrc.open("a") as f:
+                            f.write("\n# Claude Code Agent Farm completion\n")
+                            f.write(completion_script)
+                            f.write("\n")
+                        console.print(f"[green]✓ Added completion to {bashrc}[/green]")
+                    else:
+                        console.print(f"[yellow]Completion already installed in {bashrc}[/yellow]")
+                else:
+                    console.print("[red]Could not find .bashrc[/red]")
+                    raise typer.Exit(1)
+            
+            console.print("[dim]Run 'source ~/.bashrc' or start a new shell to use completion[/dim]")
+            
+        elif shell == "zsh":
+            # Install to zsh completions directory
+            comp_dirs = [
+                "/usr/local/share/zsh/site-functions",
+                "/usr/share/zsh/site-functions",
+                f"{Path.home()}/.zsh/completions",
+            ]
+            
+            installed = False
+            for comp_dir in comp_dirs:
+                comp_path = Path(comp_dir)
+                if comp_path.exists() and os.access(comp_path, os.W_OK):
+                    comp_file = comp_path / "_claude-code-agent-farm"
+                    comp_file.write_text(completion_script)
+                    console.print(f"[green]✓ Installed completion to {comp_file}[/green]")
+                    installed = True
+                    break
+            
+            if not installed:
+                # Create user completions directory
+                user_comp_dir = Path.home() / ".zsh" / "completions"
+                user_comp_dir.mkdir(parents=True, exist_ok=True)
+                comp_file = user_comp_dir / "_claude-code-agent-farm"
+                comp_file.write_text(completion_script)
+                console.print(f"[green]✓ Installed completion to {comp_file}[/green]")
+                
+                # Check if this directory is in fpath
+                zshrc = Path.home() / ".zshrc"
+                if zshrc.exists():
+                    zshrc_content = zshrc.read_text()
+                    if str(user_comp_dir) not in zshrc_content:
+                        with zshrc.open("a") as f:
+                            f.write("\n# Add claude-code-agent-farm completions\n")
+                            f.write(f"fpath=({user_comp_dir} $fpath)\n")
+                            f.write("autoload -Uz compinit && compinit\n")
+                        console.print(f"[green]✓ Updated {zshrc} to include completion directory[/green]")
+            
+            console.print("[dim]Run 'source ~/.zshrc' or start a new shell to use completion[/dim]")
+            
+        elif shell == "fish":
+            # Install to fish completions directory
+            fish_comp_dir = Path.home() / ".config" / "fish" / "completions"
+            fish_comp_dir.mkdir(parents=True, exist_ok=True)
+            comp_file = fish_comp_dir / "claude-code-agent-farm.fish"
+            comp_file.write_text(completion_script)
+            console.print(f"[green]✓ Installed completion to {comp_file}[/green]")
+            console.print("[dim]Completion will be available in new fish shells[/dim]")
+        
+        console.print("\n[bold green]Shell completion installed successfully![/bold green]")
+        console.print("You can now use Tab to complete commands and options.")
+        
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Failed to generate completion script: {e}[/red]")
+        raise typer.Exit(1) from e
+    except Exception as e:
+        console.print(f"[red]Failed to install completion: {e}[/red]")
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":
