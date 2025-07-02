@@ -2180,6 +2180,7 @@ class ClaudeAgentFarm:
                 "last_activity": a["last_activity"].isoformat(),
                 "last_restart": a["last_restart"].isoformat() if a.get("last_restart") is not None else None,
                 "last_heartbeat": a["last_heartbeat"].isoformat() if a.get("last_heartbeat") is not None else None,
+                "cycle_start_time": a["cycle_start_time"].isoformat() if a.get("cycle_start_time") is not None else None,
             }
 
         state_data = {
