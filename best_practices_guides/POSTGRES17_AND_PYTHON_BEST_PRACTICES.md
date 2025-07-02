@@ -5,10 +5,10 @@ This guide synthesizes production-grade best practices for building scalable, hi
 ### Prerequisites & System Requirements
 Ensure your environment meets these specifications:
 - **Ubuntu 25.04 Server** (latest LTS)
-- **PostgreSQL 17.5+** (with pg_vector and other extensions)
+- **PostgreSQL 17.5+** (apply minor updates within 7 days of release)
 - **Python 3.13+** (with optional free-threaded build support)
 - **uv 0.4+** for dependency management
-- **FastAPI 0.115+**, **SQLModel 0.0.25+**, **SQLAlchemy 2.0.35+**
+- **FastAPI 0.115+**, **SQLModel 0.0.25+**, **SQLAlchemy 2.0.41+**, **psycopg[binary,pool] 3.2.1+**
 
 > **Note**: This guide assumes you're building for production. Development shortcuts are explicitly marked.
 
@@ -24,9 +24,9 @@ The latest version of PostgreSQL is not included in the Ubuntu default repositor
 
 ```bash
 # Add PostgreSQL official APT repository
-sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+sudo sh -c 'echo "deb [signed-by=/etc/apt/keyrings/postgresql-keyring.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 
-# Add repository signing key
+# Add repository signing key (using signed-by method, not deprecated apt-key)
 curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql-keyring.gpg
 
 # Update package list and install PostgreSQL 17
@@ -58,6 +58,10 @@ sudo sed -i "s|data_directory = '/var/lib/postgresql/17/main'|data_directory = '
 
 # Restart PostgreSQL
 sudo systemctl restart postgresql@17-main
+
+# Schedule managed-service minor upgrades
+# For cloud providers (AWS RDS, Google Cloud SQL, Azure Database), 
+# enable automatic minor version upgrades to apply patches within 7 days
 ```
 
 ### Production-Optimized Configuration
@@ -71,7 +75,7 @@ Edit `/etc/postgresql/17/main/postgresql.conf` with these production settings:
 shared_buffers = 16GB              # 25% of total RAM
 effective_cache_size = 48GB        # 75% of total RAM
 work_mem = 128MB                   # Per-operation memory
-maintenance_work_mem = 2GB         # For VACUUM, CREATE INDEX
+maintenance_work_mem = 1GB         # PG17 vacuum now uses TidStore (20x more efficient)
 
 # PostgreSQL 17 Parallel Query Optimization
 max_parallel_workers_per_gather = 4
@@ -81,13 +85,12 @@ parallel_leader_participation = on
 
 # Write-Ahead Logging (optimized for NVMe SSDs)
 wal_compression = zstd             # New in PG15+, better than pglz
-wal_buffers = 64MB
 checkpoint_completion_target = 0.9
 max_wal_size = 8GB
 min_wal_size = 2GB
 
 # PostgreSQL 17 Vacuum Improvements
-autovacuum_vacuum_cost_limit = 2000    # Increased for faster cleanup
+autovacuum_vacuum_cost_limit = 3000    # Increased for faster cleanup with TidStore
 autovacuum_naptime = 10s                # More frequent checks
 autovacuum_vacuum_threshold = 50
 autovacuum_analyze_threshold = 50
@@ -96,6 +99,7 @@ autovacuum_freeze_max_age = 1000000000  # 1 billion
 # Connection Management
 max_connections = 200                    # Adjust based on workload
 superuser_reserved_connections = 5
+statement_timeout = 30s                  # Prevent runaway queries
 
 # Query Planner (PostgreSQL 17 optimizations)
 enable_partitionwise_aggregate = on
@@ -104,7 +108,8 @@ jit = on                                # Just-In-Time compilation
 jit_above_cost = 100000
 
 # Statistics and Monitoring
-shared_preload_libraries = 'pg_stat_statements,pgvector'
+# Use ALTER SYSTEM SET for easier container deployments
+# ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements,pgvector';
 pg_stat_statements.track = all
 pg_stat_statements.max = 10000
 
@@ -173,10 +178,14 @@ ALTER USER app_user SET search_path TO app, public;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
-CREATE EXTENSION IF NOT EXISTS "vector";  -- For AI/ML workloads
+CREATE EXTENSION IF NOT EXISTS "vector";  -- pgvector 0.7+ with HNSW, half-precision, L1/Jaccard
 
 -- PostgreSQL 17: Grant MAINTAIN privilege for non-superuser maintenance
 GRANT MAINTAIN ON SCHEMA app TO app_user;
+
+-- PostgreSQL 17: New EXPLAIN options for better visibility
+-- Use EXPLAIN (ANALYZE, MEMORY, SERIALIZE) to see memory usage and serialization costs
+-- Example: EXPLAIN (ANALYZE, MEMORY, SERIALIZE) SELECT * FROM users;
 ```
 
 ---
@@ -262,11 +271,11 @@ dependencies = [
     
     # Database - Latest async stack
     "sqlmodel>=0.0.25",
-    "sqlalchemy[asyncio]>=2.0.35",
+    "sqlalchemy[asyncio]>=2.0.41",
     "alembic>=1.13.0",
     
     # PostgreSQL drivers (choose based on needs)
-    "psycopg[binary,pool]>=3.2.0",  # Modern psycopg3
+    "psycopg[binary,pool]>=3.2.1",  # Modern psycopg3
     "asyncpg>=0.29.0",              # High-performance async
     
     # Data validation and settings
@@ -377,6 +386,48 @@ Psycopg 3 is a newly designed PostgreSQL database adapter for the Python program
 - You're building a high-throughput API
 - You don't need Django compatibility
 - You can handle the lower-level API
+
+### ✅ DO: Use psycopg3 Pipeline Mode for Batch Operations
+
+For high-throughput OLTP workloads with psycopg3, enable pipeline mode (stable in psycopg 3.2):
+
+```python
+# Using psycopg3 pipeline mode
+import psycopg
+from psycopg import AsyncConnection
+
+async def batch_insert_with_pipeline(conn: AsyncConnection, records: List[Dict]):
+    """Execute multiple statements efficiently using pipeline mode."""
+    async with conn.pipeline():
+        async with conn.cursor() as cur:
+            for record in records:
+                await cur.execute(
+                    "INSERT INTO users (email, username) VALUES (%s, %s)",
+                    (record['email'], record['username'])
+                )
+    # All statements are sent in a single batch when the pipeline exits
+```
+
+This feature is now stable and recommended by AWS and community guides for 2025 deployments.
+
+### ✅ DO: Connection Pool Sizing Best Practices
+
+Set `max_overflow=0` and monitor `.pool_status()` to prevent connection exhaustion:
+
+```python
+# Recommended pool configuration
+engine = create_async_engine(
+    "postgresql+asyncpg://...",
+    pool_size=20,
+    max_overflow=0,  # Prevent going over pool_size
+    pool_timeout=30,
+    pool_pre_ping=True,
+)
+
+# Monitor pool status
+pool_status = engine.pool.status()
+logger.info(f"Pool size: {pool_status['size']}, checked out: {pool_status['checked_out_connections']}")
+```
 
 ### ✅ DO: Implement a Robust Async Database Manager (asyncpg)
 
@@ -676,11 +727,27 @@ settings = get_settings()
 
 SQLModel is based on Python type annotations, and powered by Pydantic and SQLAlchemy
 
+### ⚠️ IMPORTANT: SQLModel Indexing Changes
+
+As of SQLModel 0.0.25+, indexes are no longer created by default. You must explicitly use `Field(index=True)` or add `Index()` in `__table_args__`:
+
+```python
+# Old behavior (pre-0.0.25): This would create an index automatically
+email: str = Field(unique=True)
+
+# New behavior (0.0.25+): Must explicitly request index
+email: str = Field(unique=True, index=True)
+```
+
+### 📌 Note on SQLModel Project Status
+
+SQLModel is maintained by a single developer and updates can be slower than SQLAlchemy. The project now has Pydantic v2.11 compatibility (0.0.25+), but some advanced SQLAlchemy 2.0 features may not be fully supported. For production applications requiring cutting-edge features, consider using SQLAlchemy directly with separate Pydantic models.
+
 ### ✅ DO: Design Models with PostgreSQL 17 Features in Mind
 
 ```python
 # src/models/base.py
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import uuid
 from sqlmodel import SQLModel, Field
@@ -690,7 +757,7 @@ from sqlalchemy.dialects.postgresql import UUID
 class TimestampMixin(SQLModel):
     """Mixin for automatic timestamp management."""
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
             DateTime(timezone=True),
             server_default=func.current_timestamp(),
@@ -698,7 +765,7 @@ class TimestampMixin(SQLModel):
         )
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
             DateTime(timezone=True),
             server_default=func.current_timestamp(),
@@ -721,7 +788,7 @@ class UUIDMixin(SQLModel):
 
 # src/models/user.py
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field, Relationship, Column, Index
 from sqlalchemy import String, func
 from pydantic import EmailStr
@@ -803,7 +870,7 @@ class Post(UUIDMixin, TimestampMixin, table=True):
 ```python
 # src/schemas/user.py
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
@@ -823,7 +890,7 @@ class UserUpdate(BaseModel):
 
 class UserResponse(BaseModel):
     """Schema for user responses (excludes sensitive data)."""
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)  # Pydantic v2 syntax
     
     id: uuid.UUID
     email: EmailStr
@@ -959,7 +1026,7 @@ class BaseRepository(Generic[ModelType]):
 # src/repositories/user.py
 from typing import Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 import structlog
 
 from src.models.user import User
@@ -1022,7 +1089,7 @@ class UserRepository(BaseRepository[User]):
         """Update user's last login timestamp."""
         async with db_manager.execute(
             "UPDATE app.users SET last_login = $1 WHERE id = $2",
-            datetime.utcnow(),
+            datetime.now(timezone.utc),
             user_id
         )
     
@@ -1865,11 +1932,291 @@ class DatabaseMonitor:
                 db_connection_pool_size.set(self._pool.get_size())
             
             return stats
+    
+    async def get_io_statistics(self) -> List[Dict]:
+        """Get I/O statistics from pg_stat_io (PostgreSQL 17 feature)."""
+        query = """
+            SELECT 
+                backend_type,
+                object,
+                context,
+                reads,
+                writes,
+                writebacks,
+                extends,
+                hits,
+                evictions,
+                reuses,
+                fsyncs
+            FROM pg_stat_io
+            WHERE backend_type IN ('client backend', 'autovacuum worker', 'background writer')
+            ORDER BY (reads + writes) DESC
+            LIMIT 20
+        """
+        
+        async with db_manager.acquire() as conn:
+            rows = await conn.fetch(query)
+            return [dict(row) for row in rows]
 ```
 
 ---
 
-## 9. Testing Strategies for Async PostgreSQL
+## 8. Vector Search with pgvector 0.7+ and Horizontal Scaling with Citus 13
+
+### ✅ DO: Leverage pgvector 0.7+ Advanced Features
+
+PostgreSQL with pgvector 0.7+ now supports HNSW indexes, half-precision vectors, and multiple distance metrics:
+
+```python
+# src/repositories/vector.py
+from typing import List, Dict, Any
+import numpy as np
+from src.core.database import db_manager
+
+class VectorRepository:
+    """Repository for vector similarity search operations."""
+    
+    async def create_vector_table(self):
+        """Create table with vector column and HNSW index."""
+        async with db_manager.transaction() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS app.embeddings (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    content TEXT NOT NULL,
+                    embedding vector(768),  -- For BERT-like models
+                    embedding_half halfvec(768),  -- Half-precision for storage efficiency
+                    metadata JSONB DEFAULT '{}',
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create HNSW index (much faster than IVFFlat for queries)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw 
+                ON app.embeddings 
+                USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64);
+            """)
+            
+            # Alternative distance metrics now supported
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embeddings_l1
+                ON app.embeddings 
+                USING hnsw (embedding vector_l1_ops);
+            """)
+    
+    async def insert_embeddings(self, items: List[Dict[str, Any]]):
+        """Bulk insert embeddings with half-precision storage."""
+        async with db_manager.transaction() as conn:
+            # Prepare data for COPY
+            records = []
+            for item in items:
+                embedding = np.array(item['embedding'], dtype=np.float32)
+                records.append((
+                    item['content'],
+                    embedding.tolist(),
+                    item.get('metadata', {})
+                ))
+            
+            # Use COPY for bulk insert
+            await conn.copy_records_to_table(
+                'embeddings',
+                records=records,
+                columns=['content', 'embedding', 'metadata'],
+                schema_name='app'
+            )
+    
+    async def similarity_search(
+        self,
+        query_embedding: List[float],
+        limit: int = 10,
+        distance_metric: str = 'cosine'
+    ) -> List[Dict]:
+        """Perform similarity search using specified distance metric."""
+        
+        # Map distance metrics to operators
+        operators = {
+            'cosine': '<=>',
+            'l1': '<+>',
+            'l2': '<->',
+            'inner_product': '<#>'
+        }
+        
+        operator = operators.get(distance_metric, '<=>')
+        
+        query = f"""
+            SELECT 
+                id,
+                content,
+                metadata,
+                embedding {operator} $1::vector AS distance
+            FROM app.embeddings
+            ORDER BY embedding {operator} $1::vector
+            LIMIT $2
+        """
+        
+        async with db_manager.acquire() as conn:
+            rows = await conn.fetch(query, query_embedding, limit)
+            return [dict(row) for row in rows]
+```
+
+### ✅ DO: Implement Horizontal Scaling with Citus 13
+
+Citus 13 brings distributed PostgreSQL 17 support with automatic sharding:
+
+```python
+# src/repositories/distributed.py
+class DistributedRepository:
+    """Repository for Citus distributed operations."""
+    
+    async def setup_distributed_tables(self):
+        """Set up Citus distributed tables."""
+        async with db_manager.transaction() as conn:
+            # Enable Citus extension
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS citus;")
+            
+            # Create a distributed table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS app.events (
+                    tenant_id UUID NOT NULL,
+                    event_id UUID NOT NULL DEFAULT gen_random_uuid(),
+                    event_type TEXT NOT NULL,
+                    payload JSONB NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (tenant_id, event_id)
+                )
+            """)
+            
+            # Distribute the table by tenant_id
+            await conn.execute("""
+                SELECT create_distributed_table('app.events', 'tenant_id');
+            """)
+            
+            # Create distributed indexes
+            await conn.execute("""
+                CREATE INDEX idx_events_created_at 
+                ON app.events (tenant_id, created_at DESC);
+            """)
+    
+    async def create_reference_table(self):
+        """Create a reference table replicated to all nodes."""
+        async with db_manager.transaction() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS app.lookup_data (
+                    key TEXT PRIMARY KEY,
+                    value JSONB NOT NULL
+                )
+            """)
+            
+            # Replicate to all worker nodes
+            await conn.execute("""
+                SELECT create_reference_table('app.lookup_data');
+            """)
+    
+    async def distributed_explain(self, query: str, params: List[Any]) -> str:
+        """Use Citus 13's distributed EXPLAIN."""
+        async with db_manager.acquire() as conn:
+            explain_query = f"EXPLAIN (ANALYZE, VERBOSE, BUFFERS) {query}"
+            rows = await conn.fetch(explain_query, *params)
+            return '\n'.join(row['QUERY PLAN'] for row in rows)
+    
+    async def get_shard_info(self, table_name: str) -> List[Dict]:
+        """Get information about table shards."""
+        query = """
+            SELECT 
+                shardid,
+                shardstate,
+                shardlength,
+                nodename,
+                nodeport
+            FROM pg_dist_shard_placement
+            JOIN pg_dist_shard USING (shardid)
+            WHERE logicalrelid = $1::regclass
+            ORDER BY shardid
+        """
+        
+        async with db_manager.acquire() as conn:
+            rows = await conn.fetch(query, f'app.{table_name}')
+            return [dict(row) for row in rows]
+```
+
+### Vector Search with Citus Distribution
+
+```python
+async def setup_distributed_vectors():
+    """Set up distributed vector search with Citus."""
+    async with db_manager.transaction() as conn:
+        # Create distributed vector table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS app.distributed_embeddings (
+                tenant_id UUID NOT NULL,
+                id UUID NOT NULL DEFAULT gen_random_uuid(),
+                embedding vector(768),
+                content TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, id)
+            )
+        """)
+        
+        # Distribute by tenant_id
+        await conn.execute("""
+            SELECT create_distributed_table(
+                'app.distributed_embeddings', 
+                'tenant_id'
+            );
+        """)
+        
+        # Citus 13 automatically creates HNSW indexes on all shards
+        await conn.execute("""
+            CREATE INDEX idx_dist_embeddings_hnsw 
+            ON app.distributed_embeddings 
+            USING hnsw (embedding vector_cosine_ops);
+        """)
+```
+
+---
+
+## 9. Logical Replication Improvements in PostgreSQL 17
+
+PostgreSQL 17 removes the need to drop logical replication slots during major version upgrades. Slot restarts are now monotonic, making blue-green deployments safer:
+
+```python
+# src/repositories/replication.py
+class ReplicationManager:
+    """Manage logical replication for zero-downtime deployments."""
+    
+    async def setup_logical_replication(self, publication_name: str = "app_publication"):
+        """Set up logical replication publication."""
+        async with db_manager.transaction() as conn:
+            # Create publication for all tables in app schema
+            await conn.execute(f"""
+                CREATE PUBLICATION {publication_name}
+                FOR ALL TABLES IN SCHEMA app
+                WITH (publish_via_partition_root = true);
+            """)
+    
+    async def monitor_replication_lag(self) -> Dict:
+        """Monitor replication lag for all subscribers."""
+        query = """
+            SELECT 
+                slot_name,
+                active,
+                restart_lsn,
+                confirmed_flush_lsn,
+                pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn) AS lag_bytes,
+                pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn)) AS lag_size
+            FROM pg_replication_slots
+            WHERE slot_type = 'logical'
+        """
+        
+        async with db_manager.acquire() as conn:
+            rows = await conn.fetch(query)
+            return [dict(row) for row in rows]
+```
+
+---
+
+## 10. Testing Strategies for Async PostgreSQL
 
 ### ✅ DO: Implement Comprehensive Async Testing
 
@@ -2080,7 +2427,7 @@ import multiprocessing
 import os
 
 # Server socket
-bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
+bind = f"0.0.0.0:{os.getenv('PORT', '8007')}"
 backlog = 2048
 
 # Worker processes
@@ -2188,9 +2535,9 @@ USER appuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8007/health || exit 1
 
-EXPOSE 8000
+EXPOSE 8007
 
 CMD ["gunicorn", "-c", "gunicorn.conf.py", "src.main:app"]
 ```
@@ -2242,7 +2589,7 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "8007:8007"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/fastapi_app
       REDIS_URL: redis://redis:6379
@@ -2258,7 +2605,7 @@ services:
     command: |
       sh -c "
         alembic upgrade head &&
-        uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+        uvicorn src.main:app --reload --host 0.0.0.0 --port 8007
       "
 
 volumes:
@@ -2290,7 +2637,7 @@ spec:
       - name: app
         image: your-registry/fastapi-app:latest
         ports:
-        - containerPort: 8000
+        - containerPort: 8007
           name: http
         env:
         - name: DATABASE_URL
@@ -2749,3 +3096,17 @@ This comprehensive guide provides a production-ready foundation for building hig
 - Add comprehensive API documentation with examples
 
 Remember: Performance is not just about speed—it's about reliability, maintainability, and scalability. This guide provides patterns that achieve all three.
+
+---
+
+## Final Checklist to Keep Your Guide Evergreen
+
+1. **Track minor releases** – Subscribe to the PGDG RSS feed or set up `apt-get --just-print upgrade` in CI to monitor PostgreSQL updates
+2. **Pin SQLAlchemy/SQLModel/Pydantic** as a coherent trio (`sqlalchemy>=2.0.41`, `sqlmodel>=0.0.25`, `pydantic>=2.11`)
+3. **Benchmark pgvector indexes** – Tune `lists` & `probes` parameters per workload for optimal HNSW performance
+4. **Observe first, then tune** – Use `EXPLAIN (MEMORY,SERIALIZE)` and `pg_stat_io` to make invisible costs visible
+5. **Enable psycopg3 pipeline mode** for batch operations to reduce round-trip latency
+6. **Set max_overflow=0** in connection pools and monitor `.pool_status()` to prevent exhaustion
+7. **Apply PostgreSQL minor updates within 7 days** – They often contain critical security fixes and performance improvements
+
+These updates reflect the newest community wisdom and production experiences as of mid-2025, ensuring your stack remains performant, secure, and maintainable.
