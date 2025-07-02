@@ -1944,6 +1944,9 @@ class ClaudeAgentFarm:
         # Copy best practices guides if configured
         self._copy_best_practices_guides()
 
+        # Ensure generated artefacts are ignored by git
+        self._ensure_gitignore_entries()
+
         try:
             # Execute workflow steps
             self.regenerate_problems()
@@ -2210,6 +2213,43 @@ class ClaudeAgentFarm:
         except Exception as e:
             console.print(f"[yellow]Warning: Could not write monitor state: {e}[/yellow]")
             tmp_file.unlink(missing_ok=True)
+
+    def _ensure_gitignore_entries(self) -> None:
+        """Add Claude Agent Farm generated artefacts to the project's .gitignore (idempotent)"""
+        # Only act if this is a git repository
+        if not (self.project_path / ".git").exists():
+            return
+
+        ignore_path = self.project_path / ".gitignore"
+
+        # Patterns we never want committed
+        patterns = [
+            "# Claude Agent Farm",  # marker comment
+            ".heartbeats/",
+            ".claude_agent_farm_state.json",
+            ".claude_agent_farm_backups/",
+            "agent_farm_report_*.html",
+        ]
+
+        if not ignore_path.exists():
+            # Create new file with our entries
+            ignore_path.write_text("\n".join(patterns) + "\n")
+            console.print("[green]✓ Created .gitignore with Claude Agent Farm entries[/green]")
+            return
+
+        # Read existing lines
+        existing = ignore_path.read_text().splitlines()
+        # Determine which patterns are missing (skip marker comment when checking)
+        missing = [p for p in patterns[1:] if p not in existing]
+
+        if missing:
+            with ignore_path.open("a") as f:
+                # Add comment if not already present
+                if patterns[0] not in existing:
+                    f.write("\n" + patterns[0] + "\n")
+                for p in missing:
+                    f.write(p + "\n")
+            console.print(f"[green]✓ Added {len(missing)} Claude Agent Farm pattern(s) to .gitignore[/green]")
 
 
 # ─────────────────────────────── CLI Entry Point ──────────────────────────── #
