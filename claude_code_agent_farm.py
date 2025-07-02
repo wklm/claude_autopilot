@@ -137,12 +137,33 @@ def tmux_send(target: str, data: str, enter: bool = True, update_heartbeat: bool
 
     for attempt in range(max_retries):
         try:
-            # Use tmux's literal mode (-l) to avoid quoting issues
             if data:
-                run(f"tmux send-keys -l -t {target} {shlex.quote(data)}", quiet=True)
+                # Use tmux buffer API for robustness with large payloads
+                # Create a temporary file with the data to avoid shell-quoting issues
+                import os
+                import tempfile
+                import uuid
+
+                with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp:
+                    tmp.write(data)
+                    tmp_path = tmp.name
+
+                buf_name = f"agentfarm_{uuid.uuid4().hex[:8]}"
+
+                try:
+                    # Load the data into a tmux buffer
+                    run(f"tmux load-buffer -b {buf_name} {shlex.quote(tmp_path)}", quiet=True)
+                    # Paste the buffer into the target pane and delete the buffer (-d)
+                    run(f"tmux paste-buffer -d -b {buf_name} -t {target}", quiet=True)
+                finally:
+                    # Clean up temp file
+                    with contextlib.suppress(FileNotFoundError):
+                        os.unlink(tmp_path)
+
                 # CRITICAL: Small delay between pasting and Enter for Claude Code
                 if enter:
                     time.sleep(0.2)
+
             if enter:
                 run(f"tmux send-keys -t {target} C-m", quiet=True)
             

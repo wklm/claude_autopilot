@@ -7,7 +7,7 @@
   },
   "best_practices_files": [],
   "chunk_size": 50,
-  "agents": 4,
+  "agents": 9,
   "session": "claude_agents",
   "stagger": 10.0,
   "wait_after_cc": 15.0,
