@@ -10,9 +10,17 @@ timestamp() {
 
 # Function to setup user matching host UID/GID
 setup_user() {
-    # Get UID/GID of the workspace directory
-    WORKSPACE_UID=$(stat -c %u /workspace 2>/dev/null || echo 1000)
-    WORKSPACE_GID=$(stat -c %g /workspace 2>/dev/null || echo 1000)
+    # Use PROJECT_PATH if set, otherwise default to /workspace
+    local work_dir="${PROJECT_PATH:-/workspace}"
+    
+    # Create parent directories to match host structure
+    if [ -n "$PARENT_DIR" ]; then
+        mkdir -p "$PARENT_DIR"
+    fi
+    
+    # Get UID/GID of the project directory
+    WORKSPACE_UID=$(stat -c %u "$work_dir" 2>/dev/null || echo 1000)
+    WORKSPACE_GID=$(stat -c %g "$work_dir" 2>/dev/null || echo 1000)
     
     # If running as root, always switch to a non-root user
     if [ "$EUID" -eq 0 ]; then
@@ -79,7 +87,7 @@ show_help() {
     echo "Claude Code Agent Farm - Docker Container"
     echo ""
     echo "Usage:"
-    echo "  docker run -v /path/to/project:/workspace claude-farm [OPTIONS]"
+    echo "  docker run -v /path/to/project:/path/to/project claude-farm [OPTIONS]"
     echo ""
     echo "Options:"
     echo "  --help                Show this help message"
@@ -135,7 +143,8 @@ git config --global --add safe.directory /opt/flutter
 # Flutter SDK should already have correct permissions from Docker build
 
 # Default values
-PROJECT_PATH="/workspace"
+# Use environment variable if set, otherwise default to /workspace
+PROJECT_PATH="${PROJECT_PATH:-/workspace}"
 ARGS=()
 
 # Setup user to match workspace ownership if running as root
@@ -300,6 +309,9 @@ fi
 
 # Execute the Claude Code Agent Farm
 echo "Starting Claude Code Agent Farm..." | { [[ "${BACKGROUND_MODE}" == "true" ]] && timestamp || cat; }
+
+# Change to project directory
+cd "$PROJECT_PATH"
 
 # Create a temporary directory for the agent farm to use
 TEMP_DIR="/tmp/claude_agent_farm_$$"

@@ -122,7 +122,7 @@ RUN echo 'export PATH="/home/claude/.venv/bin:${PATH}"' >> /home/claude/.bashrc 
     echo 'export PATH="${ANDROID_HOME}/platform-tools:${PATH}"' >> /home/claude/.bashrc && \
     echo 'export ANDROID_HOME="${ANDROID_HOME}"' >> /home/claude/.bashrc && \
     echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/claude/.bashrc && \
-    echo 'cd /workspace' >> /home/claude/.bashrc
+    echo '# cd to project directory is handled by entrypoint' >> /home/claude/.bashrc
 
 # Create workspace directory for mounting projects
 RUN mkdir -p /home/claude/workspace

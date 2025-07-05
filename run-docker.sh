@@ -65,8 +65,10 @@ if [[ -z "$PROMPT" ]]; then
     exit 1
 fi
 
-# Get current directory as project path
+# Get current directory as project path (absolute path)
 PROJECT_PATH="$(pwd)"
+# Get the real path to handle symlinks
+PROJECT_PATH="$(realpath "$PROJECT_PATH")"
 
 # Function to run a single container
 run_container() {
@@ -82,7 +84,15 @@ run_container() {
         docker_args+=("-it" "--rm")
     fi
     
-    docker_args+=("-v" "$PROJECT_PATH:/workspace")
+    # Mount to the same path as host to preserve Claude trust
+    docker_args+=("-v" "$PROJECT_PATH:$PROJECT_PATH")
+    # Pass the project path as environment variable
+    docker_args+=("-e" "PROJECT_PATH=$PROJECT_PATH")
+    
+    # Create parent directories in container to match host structure
+    # This ensures the full path exists
+    local parent_dir=$(dirname "$PROJECT_PATH")
+    docker_args+=("-e" "PARENT_DIR=$parent_dir")
     
     # No need to mount Claude anymore - it's installed via npm
     
