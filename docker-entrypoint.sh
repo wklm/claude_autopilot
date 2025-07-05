@@ -130,15 +130,16 @@ if [[ -n "$CONFIG_FILE" ]] && [[ ! " ${ARGS[@]} " =~ " --config " ]]; then
     ARGS+=("--config" "$CONFIG_FILE")
 fi
 
-# Add prompt file after config to ensure it overrides config settings
-if [[ -n "$PROMPT_FILE" ]] && [[ ! " ${ARGS[@]} " =~ " --prompt-file " ]]; then
-    ARGS+=("--prompt-file" "$PROMPT_FILE")
-elif [[ -n "$PROMPT_TEXT" ]] && [[ ! " ${ARGS[@]} " =~ " --prompt-file " ]]; then
-    # Create temporary prompt file from environment variable
-    TEMP_PROMPT="/tmp/prompt_env_$$.txt"
-    echo "$PROMPT_TEXT" > "$TEMP_PROMPT"
-    ARGS+=("--prompt-file" "$TEMP_PROMPT")
+# Create prompt.txt file in workspace if prompt is provided
+if [[ -n "$PROMPT_FILE" ]]; then
+    # Copy the provided prompt file to workspace/prompt.txt
+    cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt"
+elif [[ -n "$PROMPT_TEXT" ]]; then
+    # Create prompt.txt from the provided text
+    echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt"
 fi
+
+# Note: We don't need to pass --prompt-file since the config will use prompt.txt
 
 if [[ -n "$AGENTS" ]] && [[ ! " ${ARGS[@]} " =~ " --agents " ]]; then
     ARGS+=("--agents" "$AGENTS")
