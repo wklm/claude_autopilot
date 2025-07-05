@@ -25,9 +25,7 @@ if ! docker ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
 fi
 
 echo -e "${BLUE}Attaching to container: ${GREEN}${CONTAINER_NAME}${NC}"
-echo -e "${YELLOW}Press Ctrl+P Ctrl+Q to detach without stopping the container${NC}"
 echo ""
 
-# Attach to the container
-# The docker-entrypoint.sh will automatically attach to tmux if it exists
-docker attach "$CONTAINER_NAME"
+# Use docker exec to run view_agents.sh for an interactive menu
+docker exec -it "$CONTAINER_NAME" /app/view_agents.sh

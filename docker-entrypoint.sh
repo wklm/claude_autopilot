@@ -8,6 +8,48 @@ timestamp() {
     done
 }
 
+# Function to setup user matching host UID/GID
+setup_user() {
+    # Get UID/GID of the workspace directory
+    WORKSPACE_UID=$(stat -c %u /workspace 2>/dev/null || echo 1000)
+    WORKSPACE_GID=$(stat -c %g /workspace 2>/dev/null || echo 1000)
+    
+    # If running as root and workspace is owned by a different user
+    if [ "$EUID" -eq 0 ] && [ "$WORKSPACE_UID" -ne 0 ]; then
+        echo "Setting up user to match workspace ownership (UID: $WORKSPACE_UID, GID: $WORKSPACE_GID)"
+        
+        # Create group if it doesn't exist
+        if ! getent group $WORKSPACE_GID >/dev/null 2>&1; then
+            groupadd -g $WORKSPACE_GID hostgroup
+        fi
+        
+        # Create user if it doesn't exist
+        if ! id -u $WORKSPACE_UID >/dev/null 2>&1; then
+            useradd -m -u $WORKSPACE_UID -g $WORKSPACE_GID -s /bin/bash hostuser
+        fi
+        
+        # Get the username for the UID
+        HOST_USER=$(id -un $WORKSPACE_UID)
+        
+        # Copy Claude configuration to the new user's home
+        if [ -f "/home/claude/.claude.json" ]; then
+            cp /home/claude/.claude.json /home/$HOST_USER/.claude.json
+            chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.claude.json
+        fi
+        
+        # Set up environment for the new user
+        export HOME=/home/$HOST_USER
+        export USER=$HOST_USER
+        
+        # Make sure the user can access necessary directories
+        chown -R $WORKSPACE_UID:$WORKSPACE_GID /app 2>/dev/null || true
+        chmod -R a+rX /home/claude/.venv 2>/dev/null || true
+        
+        # Switch to the new user for the rest of the script
+        exec sudo -u $HOST_USER -E "$0" "$@"
+    fi
+}
+
 # Function to display help
 show_help() {
     echo "Claude Code Agent Farm - Docker Container"
@@ -50,23 +92,30 @@ check_claude() {
     if [ ! -f "$HOME/.claude.json" ]; then
         echo "Warning: Claude configuration not found at $HOME/.claude.json"
         echo "Claude may need to be configured before use"
-        exit 1
+        # Don't exit, just warn - Claude might be installed globally
     fi
 }
 
 # Activate virtual environment
-source /home/claude/.venv/bin/activate
+if [ -f "/home/claude/.venv/bin/activate" ]; then
+    source /home/claude/.venv/bin/activate
+else
+    echo "Warning: Virtual environment not found, using system Python"
+fi
 
 # Fix Flutter git warning
 git config --global --add safe.directory /opt/flutter
 
 # Fix Flutter permission issue - ensure Flutter directories are writable
-sudo chown -R claude:claude /opt/flutter 2>/dev/null || true
-sudo chmod -R u+w /opt/flutter 2>/dev/null || true
+# When running with --user flag, we can't use sudo
+# Flutter SDK should already have correct permissions from Docker build
 
 # Default values
 PROJECT_PATH="/workspace"
 ARGS=()
+
+# Setup user to match workspace ownership if running as root
+setup_user "$@"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -131,25 +180,22 @@ fi
 # Create prompt.txt file in workspace if prompt is provided
 if [[ -n "$PROMPT_FILE" ]]; then
     # Copy the provided prompt file to workspace/prompt.txt
-    sudo cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt"
-    sudo chown claude:claude "$PROJECT_PATH/prompt.txt"
+    cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt" 2>/dev/null || echo "Warning: Could not copy prompt file"
 elif [[ -n "$PROMPT_TEXT" ]]; then
     # Create prompt.txt from the provided text
-    echo "$PROMPT_TEXT" | sudo tee "$PROJECT_PATH/prompt.txt" > /dev/null
-    sudo chown claude:claude "$PROJECT_PATH/prompt.txt"
+    echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt" 2>/dev/null || echo "Warning: Could not create prompt file"
 fi
 
 # Add prompt.txt to .gitignore to avoid uncommitted changes issues
 if [[ -f "$PROJECT_PATH/prompt.txt" ]]; then
     if [[ -f "$PROJECT_PATH/.gitignore" ]]; then
         # Check if prompt.txt is already in .gitignore
-        if ! grep -q "^prompt\.txt$" "$PROJECT_PATH/.gitignore"; then
-            echo "prompt.txt" | sudo tee -a "$PROJECT_PATH/.gitignore" > /dev/null
+        if ! grep -q "^prompt\.txt$" "$PROJECT_PATH/.gitignore" 2>/dev/null; then
+            echo "prompt.txt" >> "$PROJECT_PATH/.gitignore" 2>/dev/null || echo "Warning: Could not update .gitignore"
         fi
     else
         # Create .gitignore with prompt.txt
-        echo "prompt.txt" | sudo tee "$PROJECT_PATH/.gitignore" > /dev/null
-        sudo chown claude:claude "$PROJECT_PATH/.gitignore"
+        echo "prompt.txt" > "$PROJECT_PATH/.gitignore" 2>/dev/null || echo "Warning: Could not create .gitignore"
     fi
 fi
 

@@ -58,11 +58,12 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 # Install Claude Code CLI from npm
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install Flutter SDK
+# Install Flutter SDK with world-readable permissions
 RUN git clone https://github.com/flutter/flutter.git -b stable ${FLUTTER_HOME} && \
     ${FLUTTER_HOME}/bin/flutter --version && \
     ${FLUTTER_HOME}/bin/flutter config --enable-web --no-analytics && \
-    ${FLUTTER_HOME}/bin/flutter precache
+    ${FLUTTER_HOME}/bin/flutter precache && \
+    chmod -R a+rX ${FLUTTER_HOME}
 
 # Install Android SDK
 RUN mkdir -p ${ANDROID_HOME} && \
@@ -118,8 +119,9 @@ RUN echo 'export PATH="/home/claude/.venv/bin:${PATH}"' >> /home/claude/.bashrc 
 # Create workspace directory for mounting projects
 RUN mkdir -p /home/claude/workspace
 
-# Copy entrypoint script
-COPY --chown=claude:claude docker-entrypoint.sh /usr/local/bin/
+# Copy entrypoint script (as root to allow dynamic user switching)
+USER root
+COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Set working directory to workspace
