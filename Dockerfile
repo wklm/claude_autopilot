@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y \
     tmux \
     sudo \
     jq \
+    # Node.js and npm for Claude installation
+    nodejs \
+    npm \
     # Flutter dependencies
     libglu1-mesa \
     clang \
@@ -58,11 +61,14 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/
 
-# Install Claude Code CLI
-RUN wget -O claude.sh "https://claude.ai/install.sh" && \
-    bash claude.sh && \
-    rm claude.sh && \
-    mv /root/.local/bin/claude /usr/local/bin/claude
+# Claude will be mounted from the host system
+# Create a symlink placeholder that will be overridden by the mount
+RUN mkdir -p /opt/claude && \
+    echo '#!/bin/bash' > /opt/claude/claude-placeholder && \
+    echo 'echo "Claude needs to be mounted from host. Use -v flag when running container."' >> /opt/claude/claude-placeholder && \
+    echo 'exit 1' >> /opt/claude/claude-placeholder && \
+    chmod +x /opt/claude/claude-placeholder && \
+    ln -s /opt/claude/claude-placeholder /usr/local/bin/claude
 
 # Install Flutter SDK
 RUN git clone https://github.com/flutter/flutter.git -b stable ${FLUTTER_HOME} && \
@@ -85,8 +91,10 @@ RUN mkdir -p ${ANDROID_HOME} && \
 RUN useradd -m -s /bin/bash claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Copy Claude configuration (if exists)
+# Copy Claude configuration (if exists) 
 COPY --chown=claude:claude claude.json /home/claude/.claude.json
+# Also copy to the claude installation directory
+COPY claude.json /opt/claude-install/claude.json
 
 # Set up working directory
 WORKDIR /app

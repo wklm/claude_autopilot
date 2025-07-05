@@ -84,6 +84,16 @@ run_container() {
     
     docker_args+=("-v" "$PROJECT_PATH:/workspace")
     
+    # Mount Claude binary from host if it exists
+    if command -v claude >/dev/null 2>&1; then
+        CLAUDE_PATH=$(which claude)
+        # If claude is in ~/.local/bin or similar, mount the actual binary
+        if [[ -L "$CLAUDE_PATH" ]]; then
+            CLAUDE_PATH=$(readlink -f "$CLAUDE_PATH")
+        fi
+        docker_args+=("-v" "$CLAUDE_PATH:/usr/local/bin/claude:ro")
+    fi
+    
     # Check if prompt is a file or text
     if [ -f "$PROMPT" ]; then
         # It's a file
