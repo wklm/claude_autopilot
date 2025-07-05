@@ -60,8 +60,9 @@ source /home/claude/.venv/bin/activate
 # Fix Flutter git warning
 git config --global --add safe.directory /opt/flutter
 
-# Fix Flutter permission issue - ensure cache directory is writable
-sudo chown -R claude:claude /opt/flutter/bin/cache 2>/dev/null || true
+# Fix Flutter permission issue - ensure Flutter directories are writable
+sudo chown -R claude:claude /opt/flutter 2>/dev/null || true
+sudo chmod -R u+w /opt/flutter 2>/dev/null || true
 
 # Default values
 PROJECT_PATH="/workspace"
@@ -229,6 +230,13 @@ fi
 
 # Execute the Claude Code Agent Farm
 echo "Starting Claude Code Agent Farm..." | { [[ "${BACKGROUND_MODE}" == "true" ]] && timestamp || cat; }
+
+# Create a temporary directory for the agent farm to use
+TEMP_DIR="/tmp/claude_agent_farm_$$"
+mkdir -p "$TEMP_DIR"
+export TMPDIR="$TEMP_DIR"
+export TEMP="$TEMP_DIR"
+export TMP="$TEMP_DIR"
 
 # Execute with or without timestamps based on background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then
