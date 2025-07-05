@@ -27,5 +27,19 @@ fi
 echo -e "${BLUE}Attaching to container: ${GREEN}${CONTAINER_NAME}${NC}"
 echo ""
 
-# Use docker exec to run view_agents.sh for an interactive menu
-docker exec -it "$CONTAINER_NAME" /app/view_agents.sh
+# Get the project path from the container's environment
+PROJECT_PATH=$(docker exec "$CONTAINER_NAME" printenv PROJECT_PATH 2>/dev/null || echo "/workspace")
+
+# Get the UID of the workspace to exec as the correct user
+WORKSPACE_UID=$(docker exec "$CONTAINER_NAME" stat -c %u "$PROJECT_PATH" 2>/dev/null || echo 1000)
+WORKSPACE_GID=$(docker exec "$CONTAINER_NAME" stat -c %g "$PROJECT_PATH" 2>/dev/null || echo 1000)
+
+# Set HOME environment variable to match the user
+if [ "$WORKSPACE_UID" -eq 1000 ]; then
+    USER_HOME="/home/node"
+else
+    USER_HOME="/home/hostuser"
+fi
+
+# Use docker exec to run view_agents.sh for an interactive menu as the correct user
+docker exec -it -u "$WORKSPACE_UID:$WORKSPACE_GID" -e "HOME=$USER_HOME" "$CONTAINER_NAME" /app/view_agents.sh

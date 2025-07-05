@@ -42,12 +42,28 @@ setup_user() {
         # Create user if it doesn't exist
         if ! id -u $WORKSPACE_UID >/dev/null 2>&1; then
             useradd -m -u $WORKSPACE_UID -g $WORKSPACE_GID -s /bin/bash hostuser
-            # Set up cc alias for the new user
+            # Set up claude-code alias for the new user
+            echo 'alias claude-code="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/hostuser/.bashrc
+            # Also set up cc alias to override system cc
             echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/hostuser/.bashrc
         fi
         
         # Get the username for the UID
         HOST_USER=$(id -un $WORKSPACE_UID)
+        
+        # Ensure the cc alias is always available (not just when creating user)
+        if [ ! -f "/home/$HOST_USER/.bashrc" ]; then
+            touch /home/$HOST_USER/.bashrc
+            chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.bashrc
+        fi
+        
+        # Add aliases if they don't exist
+        if ! grep -q "alias cc=" /home/$HOST_USER/.bashrc 2>/dev/null; then
+            echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/$HOST_USER/.bashrc
+        fi
+        if ! grep -q "alias claude-code=" /home/$HOST_USER/.bashrc 2>/dev/null; then
+            echo 'alias claude-code="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/$HOST_USER/.bashrc
+        fi
         
         # Copy Claude configuration to the new user's home
         if [ -f "/home/claude/.claude.json" ]; then
@@ -127,6 +143,11 @@ check_claude() {
         # Don't exit, just warn - Claude might be installed globally
     fi
 }
+
+# Set up PATH for Flutter and Android SDK
+export FLUTTER_HOME=/opt/flutter
+export ANDROID_HOME=/opt/android-sdk
+export PATH="${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
 
 # Activate virtual environment
 if [ -f "/home/claude/.venv/bin/activate" ]; then

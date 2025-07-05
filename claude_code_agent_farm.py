@@ -1834,11 +1834,11 @@ class ClaudeAgentFarm:
 
             self.start_agent(i)
 
-            # Check if last agent started successfully
-            if self.monitor and i > 0:
+            # Check if agent started successfully
+            if self.monitor:
                 time.sleep(1)  # Brief pause to let status update
-                prev_agent_status = self.monitor.agents[i]["status"]
-                if prev_agent_status == "error":
+                agent_status = self.monitor.agents[i]["status"]
+                if agent_status == "error":
                     if last_launch_ok:
                         # Previous launch was OK, but this one failed - double stagger
                         current_stagger = min(current_stagger * 2, 60.0)  # Cap at 60 seconds

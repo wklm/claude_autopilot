@@ -132,6 +132,10 @@ USER root
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Copy cc wrapper script to system bin
+COPY cc-wrapper.sh /usr/local/bin/cc
+RUN chmod +x /usr/local/bin/cc
+
 # Working directory will be set dynamically by entrypoint
 
 # Environment variables that can be overridden

@@ -200,6 +200,22 @@ The container supports these environment variables:
 - Use correct container number with `docker-attach.sh`
 - If tmux session doesn't exist, agent may have completed
 
+### Executing Commands in Containers
+When you need to run commands inside a container (e.g., for debugging), always exec as the workspace user, not root:
+
+```bash
+# Wrong - will run as root and Claude will refuse --dangerously-skip-permissions
+docker exec -it ccfarm-1 bash
+
+# Correct - runs as the workspace user
+docker exec -it -u 1000:1000 ccfarm-1 bash
+
+# To run Claude directly
+docker exec -u 1000:1000 ccfarm-1 claude --version
+```
+
+The container automatically switches to a non-root user matching your workspace ownership to avoid permission issues.
+
 ## Performance Considerations
 
 - Each container uses ~500MB RAM for the agent
