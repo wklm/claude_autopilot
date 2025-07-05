@@ -66,6 +66,9 @@ source /home/claude/.venv/bin/activate
 # Fix Flutter git warning
 git config --global --add safe.directory /opt/flutter
 
+# Fix Flutter permission issue - ensure cache directory is writable
+sudo chown -R claude:claude /opt/flutter/bin/cache 2>/dev/null || true
+
 # Default values
 PROJECT_PATH="/workspace"
 ARGS=()
@@ -137,6 +140,19 @@ if [[ -n "$PROMPT_FILE" ]]; then
 elif [[ -n "$PROMPT_TEXT" ]]; then
     # Create prompt.txt from the provided text
     echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt"
+fi
+
+# Add prompt.txt to .gitignore to avoid uncommitted changes issues
+if [[ -f "$PROJECT_PATH/prompt.txt" ]]; then
+    if [[ -f "$PROJECT_PATH/.gitignore" ]]; then
+        # Check if prompt.txt is already in .gitignore
+        if ! grep -q "^prompt\.txt$" "$PROJECT_PATH/.gitignore"; then
+            echo "prompt.txt" >> "$PROJECT_PATH/.gitignore"
+        fi
+    else
+        # Create .gitignore with prompt.txt
+        echo "prompt.txt" > "$PROJECT_PATH/.gitignore"
+    fi
 fi
 
 # Note: We don't need to pass --prompt-file since the config will use prompt.txt
@@ -219,8 +235,8 @@ echo "Starting Claude Code Agent Farm..." | { [[ "${BACKGROUND_MODE}" == "true" 
 
 # Add non-interactive flag for background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then
-    # Set environment variable to skip confirmations
-    export CLAUDE_AGENT_FARM_NON_INTERACTIVE=1
+    # Add skip-commit flag to avoid interactive prompts in background mode
+    ARGS+=("--skip-commit")
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}" 2>&1 | timestamp
 else
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}"
