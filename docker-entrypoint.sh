@@ -130,10 +130,12 @@ fi
 # Create prompt.txt file in workspace if prompt is provided
 if [[ -n "$PROMPT_FILE" ]]; then
     # Copy the provided prompt file to workspace/prompt.txt
-    cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt"
+    sudo cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt"
+    sudo chown claude:claude "$PROJECT_PATH/prompt.txt"
 elif [[ -n "$PROMPT_TEXT" ]]; then
     # Create prompt.txt from the provided text
-    echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt"
+    echo "$PROMPT_TEXT" | sudo tee "$PROJECT_PATH/prompt.txt" > /dev/null
+    sudo chown claude:claude "$PROJECT_PATH/prompt.txt"
 fi
 
 # Add prompt.txt to .gitignore to avoid uncommitted changes issues
@@ -141,11 +143,12 @@ if [[ -f "$PROJECT_PATH/prompt.txt" ]]; then
     if [[ -f "$PROJECT_PATH/.gitignore" ]]; then
         # Check if prompt.txt is already in .gitignore
         if ! grep -q "^prompt\.txt$" "$PROJECT_PATH/.gitignore"; then
-            echo "prompt.txt" >> "$PROJECT_PATH/.gitignore"
+            echo "prompt.txt" | sudo tee -a "$PROJECT_PATH/.gitignore" > /dev/null
         fi
     else
         # Create .gitignore with prompt.txt
-        echo "prompt.txt" > "$PROJECT_PATH/.gitignore"
+        echo "prompt.txt" | sudo tee "$PROJECT_PATH/.gitignore" > /dev/null
+        sudo chown claude:claude "$PROJECT_PATH/.gitignore"
     fi
 fi
 
