@@ -82,8 +82,8 @@ RUN useradd -m -s /bin/bash claude && \
 
 # Copy Claude configuration (if exists) 
 COPY --chown=claude:claude claude.json /home/claude/.claude.json
-# Also copy to the claude installation directory
-COPY claude.json /opt/claude-install/claude.json
+# Also copy to root's home for npm global installation
+COPY claude.json /root/.claude.json
 
 # Set up working directory
 WORKDIR /app

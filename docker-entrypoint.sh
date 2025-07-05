@@ -35,6 +35,11 @@ setup_user() {
         if [ -f "/home/claude/.claude.json" ]; then
             cp /home/claude/.claude.json /home/$HOST_USER/.claude.json
             chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.claude.json
+            
+            # Also ensure the global Claude npm installation can find the config
+            # Create .config directory if it doesn't exist
+            mkdir -p /home/$HOST_USER/.config
+            chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.config
         fi
         
         # Set up environment for the new user

@@ -967,7 +967,11 @@ class ClaudeAgentFarm:
             
         # Copy to project's best_practices_guides folder
         dest_dir = self.project_path / "best_practices_guides"
-        dest_dir.mkdir(exist_ok=True)
+        try:
+            dest_dir.mkdir(exist_ok=True)
+        except PermissionError:
+            console.print(f"[yellow]Warning: Cannot create best_practices_guides directory (permission denied)[/yellow]")
+            return
         
         # Copy specified files
         copied_files = []
@@ -1083,8 +1087,9 @@ class ClaudeAgentFarm:
             os.chdir(self.project_path)
 
             # Use a proper temporary file to avoid conflicts
+            # Use system temp directory instead of project path to avoid permission issues
             tmpfile_fd, tmpfile_name = tempfile.mkstemp(
-                dir=self.project_path, prefix="combined_", suffix=".tmp", text=True
+                prefix="combined_", suffix=".tmp", text=True
             )
             tmpfile_path = Path(tmpfile_name)
             
@@ -2018,20 +2023,30 @@ class ClaudeAgentFarm:
 
         # Clean up state file
         if hasattr(self, "state_file") and self.state_file.exists():
-            self.state_file.unlink()
-            console.print("[green]✓ Monitor state file cleaned up[/green]")
+            try:
+                self.state_file.unlink()
+                console.print("[green]✓ Monitor state file cleaned up[/green]")
+            except PermissionError:
+                console.print("[yellow]Warning: Cannot clean up monitor state file (permission denied)[/yellow]")
         
         # Clean up heartbeat files
         heartbeats_dir = self.project_path / ".heartbeats"
         if heartbeats_dir.exists():
-            for hb_file in heartbeats_dir.glob("agent*.heartbeat"):
-                hb_file.unlink(missing_ok=True)
             try:
-                heartbeats_dir.rmdir()  # Remove directory if empty
-                console.print("[green]✓ Heartbeat files cleaned up[/green]")
-            except OSError:
-                # Directory not empty or other error
-                pass
+                for hb_file in heartbeats_dir.glob("agent*.heartbeat"):
+                    try:
+                        hb_file.unlink(missing_ok=True)
+                    except PermissionError:
+                        pass  # Skip files we can't delete
+                try:
+                    heartbeats_dir.rmdir()  # Remove directory if empty
+                    console.print("[green]✓ Heartbeat files cleaned up[/green]")
+                except (OSError, PermissionError):
+                    # Directory not empty or permission denied
+                    pass
+            except PermissionError:
+                # Can't even list directory contents
+                console.print("[yellow]Warning: Cannot clean up heartbeat files (permission denied)[/yellow]")
 
         # Generate HTML report before final cleanup
         self.generate_html_report()

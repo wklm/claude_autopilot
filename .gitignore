@@ -64,3 +64,10 @@ dmypy.json
 .claude_agent_farm_state.json
 .claude_agent_farm_state.tmp
 .ruff_cache/
+# Claude Agent Farm
+.heartbeats/
+.claude_agent_farm_backups/
+agent_farm_report_*.html
+
+# Claude configuration (copied during Docker build)
+claude.json
