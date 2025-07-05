@@ -26,6 +26,8 @@ setup_user() {
         # Create user if it doesn't exist
         if ! id -u $WORKSPACE_UID >/dev/null 2>&1; then
             useradd -m -u $WORKSPACE_UID -g $WORKSPACE_GID -s /bin/bash hostuser
+            # Set up cc alias for the new user
+            echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/hostuser/.bashrc
         fi
         
         # Get the username for the UID
@@ -35,12 +37,19 @@ setup_user() {
         if [ -f "/home/claude/.claude.json" ]; then
             cp /home/claude/.claude.json /home/$HOST_USER/.claude.json
             chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.claude.json
-            
-            # Also ensure the global Claude npm installation can find the config
-            # Create .config directory if it doesn't exist
-            mkdir -p /home/$HOST_USER/.config
-            chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.config
         fi
+        
+        # Copy Claude session directory
+        if [ -d "/home/claude/.claude" ]; then
+            cp -rp /home/claude/.claude /home/$HOST_USER/.claude
+            chown -R $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.claude
+            # Ensure credentials file has proper permissions
+            chmod 600 /home/$HOST_USER/.claude/.credentials.json 2>/dev/null || true
+        fi
+        
+        # Create .config directory if it doesn't exist
+        mkdir -p /home/$HOST_USER/.config
+        chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.config
         
         # Set up environment for the new user
         export HOME=/home/$HOST_USER

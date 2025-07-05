@@ -12,18 +12,32 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}Building Claude Code Agent Farm Docker Image with Flutter${NC}"
 
-# Copy Claude configuration if it exists
-CLAUDE_CONFIG_SRC="$HOME/.claude.json"
-CLAUDE_CONFIG_DEST="./claude.json"
+# Copy Claude configuration and session data
+CLAUDE_JSON_SRC="$HOME/.claude.json"
+CLAUDE_JSON_DEST="./claude.json"
+CLAUDE_DIR_SRC="$HOME/.claude"
+CLAUDE_DIR_DEST="./.claude"
 
-if [ -f "$CLAUDE_CONFIG_SRC" ]; then
-    echo -e "${GREEN}Copying Claude configuration from $CLAUDE_CONFIG_SRC${NC}"
-    cp "$CLAUDE_CONFIG_SRC" "$CLAUDE_CONFIG_DEST"
+# Copy .claude.json if it exists
+if [ -f "$CLAUDE_JSON_SRC" ]; then
+    echo -e "${GREEN}Copying Claude configuration from $CLAUDE_JSON_SRC${NC}"
+    cp "$CLAUDE_JSON_SRC" "$CLAUDE_JSON_DEST"
 else
-    echo -e "${YELLOW}Warning: Claude configuration not found at $CLAUDE_CONFIG_SRC${NC}"
-    echo -e "${YELLOW}The container will need manual Claude setup${NC}"
+    echo -e "${YELLOW}Warning: Claude configuration not found at $CLAUDE_JSON_SRC${NC}"
     # Create empty file to prevent build failure
-    echo '{}' > "$CLAUDE_CONFIG_DEST"
+    echo '{}' > "$CLAUDE_JSON_DEST"
+fi
+
+# Copy .claude directory if it exists
+if [ -d "$CLAUDE_DIR_SRC" ]; then
+    echo -e "${GREEN}Copying Claude session data from $CLAUDE_DIR_SRC${NC}"
+    # Remove existing copy if present
+    rm -rf "$CLAUDE_DIR_DEST" 2>/dev/null || true
+    # Copy preserving permissions
+    cp -rp "$CLAUDE_DIR_SRC" "$CLAUDE_DIR_DEST"
+else
+    echo -e "${YELLOW}Warning: Claude session directory not found at $CLAUDE_DIR_SRC${NC}"
+    echo -e "${YELLOW}The container will need manual Claude setup${NC}"
 fi
 
 # Claude will be installed via npm in the container
@@ -32,9 +46,12 @@ fi
 echo -e "${GREEN}Building Docker image...${NC}"
 docker build -t claude-code-agent-farm:flutter .
 
-# Clean up temporary config file
-if [ -f "$CLAUDE_CONFIG_DEST" ]; then
-    rm "$CLAUDE_CONFIG_DEST"
+# Clean up temporary files
+if [ -f "$CLAUDE_JSON_DEST" ]; then
+    rm "$CLAUDE_JSON_DEST"
+fi
+if [ -d "$CLAUDE_DIR_DEST" ]; then
+    rm -rf "$CLAUDE_DIR_DEST"
 fi
 
 echo -e "${GREEN}Build complete!${NC}"

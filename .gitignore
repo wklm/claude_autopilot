@@ -71,3 +71,5 @@ agent_farm_report_*.html
 
 # Claude configuration (copied during Docker build)
 claude.json
+.claude/
+prompt.txt

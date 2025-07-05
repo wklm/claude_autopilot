@@ -85,6 +85,14 @@ COPY --chown=claude:claude claude.json /home/claude/.claude.json
 # Also copy to root's home for npm global installation
 COPY claude.json /root/.claude.json
 
+# Copy Claude session directory (if exists during build)
+# This includes API credentials and other session data
+COPY --chown=claude:claude .claude /home/claude/.claude
+# Also copy to root's home
+COPY .claude /root/.claude
+# Fix permissions on credentials file
+RUN chmod 600 /home/claude/.claude/.credentials.json /root/.claude/.credentials.json 2>/dev/null || true
+
 # Set up working directory
 WORKDIR /app
 
@@ -123,6 +131,9 @@ RUN mkdir -p /home/claude/workspace
 USER root
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Set up cc alias for root user as well
+RUN echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /root/.bashrc
 
 # Set working directory to workspace
 WORKDIR /workspace
