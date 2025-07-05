@@ -233,10 +233,8 @@ fi
 # Execute the Claude Code Agent Farm
 echo "Starting Claude Code Agent Farm..." | { [[ "${BACKGROUND_MODE}" == "true" ]] && timestamp || cat; }
 
-# Add non-interactive flag for background mode
+# Execute with or without timestamps based on background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then
-    # Add skip-commit flag to avoid interactive prompts in background mode
-    ARGS+=("--skip-commit")
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}" 2>&1 | timestamp
 else
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}"

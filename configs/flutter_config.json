@@ -13,7 +13,7 @@
   "wait_after_cc": 20.0,
   "check_interval": 5,
   "skip_regenerate": false,
-  "skip_commit": false,
+  "skip_commit": true,
   "auto_restart": true,
   "no_monitor": false,
   "attach": false,
