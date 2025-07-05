@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+.claude_agent_farm_backups/
+.claude_agent_farm_state.json
+.heartbeats/
+*.log
+agent_farm_report_*.html
+node_modules/
+package-lock.json
+package.json
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# direnv
+.envrc
+.direnv/
+
+# Don't ignore the claude config that will be copied
+!claude.json
