@@ -14,9 +14,17 @@ setup_user() {
     WORKSPACE_UID=$(stat -c %u /workspace 2>/dev/null || echo 1000)
     WORKSPACE_GID=$(stat -c %g /workspace 2>/dev/null || echo 1000)
     
-    # If running as root and workspace is owned by a different user
-    if [ "$EUID" -eq 0 ] && [ "$WORKSPACE_UID" -ne 0 ]; then
-        echo "Setting up user to match workspace ownership (UID: $WORKSPACE_UID, GID: $WORKSPACE_GID)"
+    # If running as root, always switch to a non-root user
+    if [ "$EUID" -eq 0 ]; then
+        # If workspace is owned by root, use the claude user instead
+        if [ "$WORKSPACE_UID" -eq 0 ]; then
+            echo "Workspace is owned by root, switching to claude user"
+            export HOME=/home/claude
+            export USER=claude
+            export CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
+            exec sudo -u claude -E "$0" "$@"
+        else
+            echo "Setting up user to match workspace ownership (UID: $WORKSPACE_UID, GID: $WORKSPACE_GID)"
         
         # Create group if it doesn't exist
         if ! getent group $WORKSPACE_GID >/dev/null 2>&1; then
@@ -54,6 +62,7 @@ setup_user() {
         # Set up environment for the new user
         export HOME=/home/$HOST_USER
         export USER=$HOST_USER
+        export CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
         
         # Make sure the user can access necessary directories
         chown -R $WORKSPACE_UID:$WORKSPACE_GID /app 2>/dev/null || true
@@ -61,6 +70,7 @@ setup_user() {
         
         # Switch to the new user for the rest of the script
         exec sudo -u $HOST_USER -E "$0" "$@"
+        fi
     fi
 }
 

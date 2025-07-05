@@ -132,9 +132,6 @@ USER root
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Set up cc alias for root user as well
-RUN echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /root/.bashrc
-
 # Set working directory to workspace
 WORKDIR /workspace
 
@@ -144,6 +141,9 @@ ENV PROMPT_TEXT=""
 ENV CONFIG_FILE="/app/configs/flutter_config.json"
 ENV AGENTS="1"
 ENV AUTO_RESTART="true"
+
+# Skip Claude permission prompts
+ENV CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
 
 # Expose any ports if needed (Flutter web runs on 8080 by default)
 EXPOSE 8080
