@@ -91,7 +91,7 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --help                Show this help message"
-    echo "  --path PATH          Project path (default: /workspace)"
+    echo "  --path PATH          Project path (default: current directory)"
     echo "  --config CONFIG      Config file (default: /app/configs/flutter_config.json)"
     echo "  --agents N           Number of agents (default: 1)"
     echo "  --prompt-file FILE   Path to prompt file"
@@ -107,16 +107,16 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  # With prompt file mounted"
-    echo "  docker run -v /my/project:/workspace -v /my/prompt.txt:/prompt.txt \\"
-    echo "    claude-farm --prompt-file /prompt.txt"
+    echo "  docker run -v /my/project:/my/project -v /my/prompt.txt:/prompt.txt \\"
+    echo "    -e PROJECT_PATH=/my/project claude-farm --prompt-file /prompt.txt"
     echo ""
     echo "  # With prompt text"
-    echo "  docker run -v /my/project:/workspace \\"
-    echo "    -e PROMPT_TEXT='Fix all type errors' claude-farm"
+    echo "  docker run -v /my/project:/my/project \\"
+    echo "    -e PROJECT_PATH=/my/project -e PROMPT_TEXT='Fix all type errors' claude-farm"
     echo ""
     echo "  # With custom config"
-    echo "  docker run -v /my/project:/workspace -v /my/config.json:/config.json \\"
-    echo "    claude-farm --config /config.json --agents 5"
+    echo "  docker run -v /my/project:/my/project -v /my/config.json:/config.json \\"
+    echo "    -e PROJECT_PATH=/my/project claude-farm --config /config.json --agents 5"
 }
 
 # Check if Claude is configured
@@ -147,10 +147,8 @@ git config --global --add safe.directory /opt/flutter
 PROJECT_PATH="${PROJECT_PATH:-/workspace}"
 ARGS=()
 
-# Setup user to match workspace ownership if running as root
-setup_user "$@"
-
-# Parse command line arguments
+# Parse command line arguments first (before user switch)
+# This ensures we have all the variables set before switching users
 while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
@@ -210,25 +208,47 @@ if [[ -n "$CONFIG_FILE" ]] && [[ ! " ${ARGS[@]} " =~ " --config " ]]; then
     ARGS+=("--config" "$CONFIG_FILE")
 fi
 
-# Create prompt.txt file in workspace if prompt is provided
-if [[ -n "$PROMPT_FILE" ]]; then
-    # Copy the provided prompt file to workspace/prompt.txt
-    cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt" 2>/dev/null || echo "Warning: Could not copy prompt file"
-elif [[ -n "$PROMPT_TEXT" ]]; then
-    # Create prompt.txt from the provided text
-    echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt" 2>/dev/null || echo "Warning: Could not create prompt file"
+# Create prompt.txt file BEFORE switching users (while still root)
+if [ "$EUID" -eq 0 ]; then
+    if [[ -n "$PROMPT_FILE" ]]; then
+        # Copy the provided prompt file to workspace/prompt.txt
+        cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt"
+        # Get workspace UID/GID to set correct ownership
+        WORKSPACE_UID=$(stat -c %u "$PROJECT_PATH" 2>/dev/null || echo 1000)
+        WORKSPACE_GID=$(stat -c %g "$PROJECT_PATH" 2>/dev/null || echo 1000)
+        chown $WORKSPACE_UID:$WORKSPACE_GID "$PROJECT_PATH/prompt.txt"
+    elif [[ -n "$PROMPT_TEXT" ]]; then
+        # Create prompt.txt from the provided text
+        echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt"
+        # Get workspace UID/GID to set correct ownership
+        WORKSPACE_UID=$(stat -c %u "$PROJECT_PATH" 2>/dev/null || echo 1000)
+        WORKSPACE_GID=$(stat -c %g "$PROJECT_PATH" 2>/dev/null || echo 1000)
+        chown $WORKSPACE_UID:$WORKSPACE_GID "$PROJECT_PATH/prompt.txt"
+    fi
+else
+    # If not root, try to create anyway
+    if [[ -n "$PROMPT_FILE" ]]; then
+        cp "$PROMPT_FILE" "$PROJECT_PATH/prompt.txt" 2>/dev/null || echo "Warning: Could not copy prompt file"
+    elif [[ -n "$PROMPT_TEXT" ]]; then
+        echo "$PROMPT_TEXT" > "$PROJECT_PATH/prompt.txt" 2>/dev/null || echo "Warning: Could not create prompt file"
+    fi
 fi
 
-# Add prompt.txt to .gitignore to avoid uncommitted changes issues
-if [[ -f "$PROJECT_PATH/prompt.txt" ]]; then
+# Add prompt.txt to .gitignore to avoid uncommitted changes issues (as root)
+if [ "$EUID" -eq 0 ] && [[ -f "$PROJECT_PATH/prompt.txt" ]]; then
+    WORKSPACE_UID=$(stat -c %u "$PROJECT_PATH" 2>/dev/null || echo 1000)
+    WORKSPACE_GID=$(stat -c %g "$PROJECT_PATH" 2>/dev/null || echo 1000)
+    
     if [[ -f "$PROJECT_PATH/.gitignore" ]]; then
         # Check if prompt.txt is already in .gitignore
         if ! grep -q "^prompt\.txt$" "$PROJECT_PATH/.gitignore" 2>/dev/null; then
-            echo "prompt.txt" >> "$PROJECT_PATH/.gitignore" 2>/dev/null || echo "Warning: Could not update .gitignore"
+            echo "prompt.txt" >> "$PROJECT_PATH/.gitignore"
+            chown $WORKSPACE_UID:$WORKSPACE_GID "$PROJECT_PATH/.gitignore"
         fi
     else
         # Create .gitignore with prompt.txt
-        echo "prompt.txt" > "$PROJECT_PATH/.gitignore" 2>/dev/null || echo "Warning: Could not create .gitignore"
+        echo "prompt.txt" > "$PROJECT_PATH/.gitignore"
+        chown $WORKSPACE_UID:$WORKSPACE_GID "$PROJECT_PATH/.gitignore"
     fi
 fi
 
@@ -245,15 +265,18 @@ fi
 # Check if workspace exists and is mounted
 if [[ ! -d "$PROJECT_PATH" ]]; then
     echo "Error: Project directory $PROJECT_PATH does not exist"
-    echo "Please mount your project directory with: -v /path/to/project:/workspace"
+    echo "Please mount your project directory with: -v /path/to/project:/path/to/project"
     exit 1
 fi
 
 # Check if workspace is empty (not mounted)
 if [[ -z "$(ls -A $PROJECT_PATH 2>/dev/null)" ]]; then
     echo "Warning: Project directory $PROJECT_PATH is empty"
-    echo "Make sure you mounted your project correctly with: -v /path/to/project:/workspace"
+    echo "Make sure you mounted your project correctly with: -v /path/to/project:/path/to/project"
 fi
+
+# Now switch to appropriate user after files are created
+setup_user "$@"
 
 # Check Claude installation
 check_claude

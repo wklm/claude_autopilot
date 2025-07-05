@@ -132,8 +132,7 @@ USER root
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Set working directory to workspace
-WORKDIR /workspace
+# Working directory will be set dynamically by entrypoint
 
 # Environment variables that can be overridden
 ENV PROMPT_FILE=""
