@@ -45,18 +45,12 @@ show_help() {
     echo "    claude-farm --config /config.json --agents 5"
 }
 
-# Check if Claude is available
+# Check if Claude is configured
 check_claude() {
-    if ! command -v claude &> /dev/null; then
-        echo "Error: Claude Code CLI is not installed or not in PATH"
-        echo "Please ensure Claude Code is installed in the container"
-        exit 1
-    fi
-    
-    # Check if Claude is configured
     if [ ! -f "$HOME/.claude.json" ]; then
         echo "Warning: Claude configuration not found at $HOME/.claude.json"
         echo "Claude may need to be configured before use"
+        exit 1
     fi
 }
 

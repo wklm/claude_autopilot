@@ -1,5 +1,5 @@
 # Claude Code Agent Farm with Flutter Environment
-FROM ubuntu:22.04
+FROM node:20-bookworm
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -22,9 +22,6 @@ RUN apt-get update && apt-get install -y \
     tmux \
     sudo \
     jq \
-    # Node.js and npm for Claude installation
-    nodejs \
-    npm \
     # Flutter dependencies
     libglu1-mesa \
     clang \
@@ -49,26 +46,17 @@ RUN apt-get update && apt-get install -y \
     liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python 3.13
-RUN add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && \
-    apt-get install -y python3.13 python3.13-dev python3.13-venv python3-pip && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1 && \
-    update-alternatives --set python3 /usr/bin/python3.13 && \
+# Install Python 3 (Debian has 3.11 which is sufficient)
+RUN apt-get update && \
+    apt-get install -y python3 python3-dev python3-venv python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv package manager
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/
 
-# Claude will be mounted from the host system
-# Create a symlink placeholder that will be overridden by the mount
-RUN mkdir -p /opt/claude && \
-    echo '#!/bin/bash' > /opt/claude/claude-placeholder && \
-    echo 'echo "Claude needs to be mounted from host. Use -v flag when running container."' >> /opt/claude/claude-placeholder && \
-    echo 'exit 1' >> /opt/claude/claude-placeholder && \
-    chmod +x /opt/claude/claude-placeholder && \
-    ln -s /opt/claude/claude-placeholder /usr/local/bin/claude
+# Install Claude Code CLI from npm
+RUN npm install -g @anthropic-ai/claude-code
 
 # Install Flutter SDK
 RUN git clone https://github.com/flutter/flutter.git -b stable ${FLUTTER_HOME} && \

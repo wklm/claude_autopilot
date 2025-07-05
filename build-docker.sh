@@ -26,17 +26,7 @@ else
     echo '{}' > "$CLAUDE_CONFIG_DEST"
 fi
 
-# Check if Claude binary is available
-if command -v claude >/dev/null 2>&1; then
-    CLAUDE_PATH=$(which claude)
-    if [[ -L "$CLAUDE_PATH" ]]; then
-        CLAUDE_PATH=$(readlink -f "$CLAUDE_PATH")
-    fi
-    echo -e "${GREEN}Found Claude binary at: $CLAUDE_PATH${NC}"
-else
-    echo -e "${YELLOW}Warning: Claude binary not found on host${NC}"
-    echo -e "${YELLOW}Make sure Claude is installed and in PATH${NC}"
-fi
+# Claude will be installed via npm in the container
 
 # Build the Docker image
 echo -e "${GREEN}Building Docker image...${NC}"

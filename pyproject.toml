@@ -7,7 +7,7 @@ name = "claude-code-agent-farm"
 version = "1.0.0"
 description = "Orchestrate multiple Claude Code agents for parallel code fixing"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "Jeffrey Emanuel", email = "jeffrey.emanuel@gmail.com" },
