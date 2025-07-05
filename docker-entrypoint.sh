@@ -63,6 +63,9 @@ check_claude() {
 # Activate virtual environment
 source /home/claude/.venv/bin/activate
 
+# Fix Flutter git warning
+git config --global --add safe.directory /opt/flutter
+
 # Default values
 PROJECT_PATH="/workspace"
 ARGS=()
@@ -122,6 +125,12 @@ if [[ ! " ${ARGS[@]} " =~ " --path " ]]; then
 fi
 
 # Handle environment variables
+# Add config first so it can be overridden by other arguments
+if [[ -n "$CONFIG_FILE" ]] && [[ ! " ${ARGS[@]} " =~ " --config " ]]; then
+    ARGS+=("--config" "$CONFIG_FILE")
+fi
+
+# Add prompt file after config to ensure it overrides config settings
 if [[ -n "$PROMPT_FILE" ]] && [[ ! " ${ARGS[@]} " =~ " --prompt-file " ]]; then
     ARGS+=("--prompt-file" "$PROMPT_FILE")
 elif [[ -n "$PROMPT_TEXT" ]] && [[ ! " ${ARGS[@]} " =~ " --prompt-file " ]]; then
@@ -129,10 +138,6 @@ elif [[ -n "$PROMPT_TEXT" ]] && [[ ! " ${ARGS[@]} " =~ " --prompt-file " ]]; the
     TEMP_PROMPT="/tmp/prompt_env_$$.txt"
     echo "$PROMPT_TEXT" > "$TEMP_PROMPT"
     ARGS+=("--prompt-file" "$TEMP_PROMPT")
-fi
-
-if [[ -n "$CONFIG_FILE" ]] && [[ ! " ${ARGS[@]} " =~ " --config " ]]; then
-    ARGS+=("--config" "$CONFIG_FILE")
 fi
 
 if [[ -n "$AGENTS" ]] && [[ ! " ${ARGS[@]} " =~ " --agents " ]]; then
@@ -210,7 +215,11 @@ fi
 
 # Execute the Claude Code Agent Farm
 echo "Starting Claude Code Agent Farm..." | { [[ "${BACKGROUND_MODE}" == "true" ]] && timestamp || cat; }
+
+# Add non-interactive flag for background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then
+    # Set environment variable to skip confirmations
+    export CLAUDE_AGENT_FARM_NON_INTERACTIVE=1
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}" 2>&1 | timestamp
 else
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}"
