@@ -234,7 +234,7 @@ Think of it like this:
 There's a hidden command for running just the monitor display:
 
 ```bash
-claude-code-agent-farm monitor-only --path /project --session claude_agents
+# Monitor display is integrated into the main process in single-agent container mode
 ```
 
 This reads the monitor state file and displays the dashboard without launching agents.
@@ -493,7 +493,6 @@ claude-code-agent-farm \
 ```
 Commands:
   doctor                   Run pre-flight verification checks
-  monitor-only             Display monitor dashboard (internal use)
 
 Required:
   --path PATH               Project root directory
@@ -728,36 +727,15 @@ When `--auto-restart` is enabled:
 - Tracks restart count per agent
 - Disables agents after max_errors threshold
 
-### Monitor State File
+### Monitoring
 
-The system writes monitor state to `.claude_agent_farm_state.json` in the project directory. This file contains:
-- Agent statuses and health metrics
-- Session information
-- Runtime statistics
-
-Structure:
-```json
-{
-  "session": "claude_agents",
-  "num_agents": 20,
-  "agents": {
-    "0": {
-      "status": "working",
-      "start_time": "2024-01-15T10:30:00",
-      "last_activity": "2024-01-15T10:35:00",
-      "last_restart": null,
-      "cycles": 2,
-      "last_context": 75,
-      "errors": 0,
-      "restart_count": 0
-    }
-  },
-  "start_time": "2024-01-15T10:30:00",
-  "timestamp": "2024-01-15T10:35:00"
-}
-```
-
-External tools can read this file to monitor the farm's progress.
+In single-agent container mode, monitoring is integrated into the main process. The monitor displays real-time agent status directly in the console, including:
+- Agent status (working, ready, idle, error, usage_limit)
+- Cycle count
+- Context percentage
+- Runtime
+- Heartbeat
+- Error count
 
 ### HTML Run Reports
 
@@ -896,7 +874,7 @@ claude-code-agent-farm \
 
 ### Debug Features
 
-- **State File**: Check `.claude_agent_farm_state.json` for agent status
+- **Agent Status**: Monitor displays real-time agent status in the console
 - **Heartbeat Files**: Monitor `.heartbeats/agent*.heartbeat` for activity tracking
 - **Lock Files**: Look for `.agent_farm_launch.lock` in `~/.claude/`
 - **Backup Directory**: `.claude_agent_farm_backups/` in project contains settings backups
@@ -1123,7 +1101,7 @@ MIT License - see [LICENSE](LICENSE) file
 ## 🔍 Additional Resources
 
 ### Monitoring Tools
-- Monitor state file (`.claude_agent_farm_state.json`) for external integrations
+- Real-time monitoring integrated into the main process
 - Heartbeat files (`.heartbeats/agent*.heartbeat`) track agent activity
 - tmux pane titles show real-time context warnings
 - tmux session logs for debugging agent issues

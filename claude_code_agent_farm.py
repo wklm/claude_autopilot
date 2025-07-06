@@ -59,7 +59,6 @@ def interruptible_confirm(message: str, default: bool = False) -> bool:
 
 # ─────────────────────────────── Constants ────────────────────────────────── #
 
-MONITOR_STATE_FILE = ".claude_agent_farm_state.json"
 
 # ─────────────────────────────── Helper Functions ─────────────────────────── #
 
@@ -362,6 +361,7 @@ class AgentMonitor:
             "Invalid API key",
             "Authentication failed",
             "Rate limit exceeded",
+            "Claude usage limit reached",
             "Unauthorized",
             "Permission denied",
             "Failed to load configuration",
@@ -389,6 +389,16 @@ class AgentMonitor:
             "Create account",
         ]
         return any(indicator in content for indicator in error_indicators)
+    
+    def is_usage_limit_error(self, content: str) -> bool:
+        """Check if captured content indicates Claude usage limit has been reached"""
+        usage_limit_indicators = [
+            "Claude usage limit reached",
+            "usage limit reached",
+            "daily limit exceeded",
+            "usage quota exceeded",
+        ]
+        return any(indicator.lower() in content.lower() for indicator in usage_limit_indicators)
 
     def check_agent(self, agent_id: int) -> Dict:
         """Check status of a single agent"""
@@ -408,8 +418,16 @@ class AgentMonitor:
 
         # Check for errors
         if self.has_settings_error(content):
-            agent["status"] = "error"
-            agent["errors"] += 1
+            # Check specifically for usage limit error
+            if self.is_usage_limit_error(content):
+                agent["status"] = "usage_limit"
+                agent["errors"] += 1
+                # Set a special flag to indicate usage limit
+                agent["usage_limit_reached"] = datetime.now()
+                console.print(f"[red]Agent {agent_id}: Claude usage limit reached - pausing operations[/red]")
+            else:
+                agent["status"] = "error"
+                agent["errors"] += 1
         else:
             # Store previous status to detect transitions
             prev_status = agent.get("status", "unknown")
@@ -528,6 +546,18 @@ class AgentMonitor:
         """Determine if an agent needs to be restarted"""
         agent = self.agents[agent_id]
         
+        # Don't restart if usage limit reached
+        if agent["status"] == "usage_limit":
+            # Check if we've waited long enough (1 hour)
+            if "usage_limit_reached" in agent:
+                time_since_limit = (datetime.now() - agent["usage_limit_reached"]).total_seconds()
+                if time_since_limit < 3600:  # 1 hour
+                    return False
+                else:
+                    # Clear the usage limit flag after 1 hour
+                    del agent["usage_limit_reached"]
+            return False
+        
         # Check heartbeat age - if older than 2 minutes, agent might be stuck
         heartbeat_age = self._check_heartbeat_age(agent_id)
         if heartbeat_age is not None and heartbeat_age > 120:
@@ -566,6 +596,7 @@ class AgentMonitor:
                 "ready": "[cyan]",
                 "idle": "[yellow]",
                 "error": "[red]",
+                "usage_limit": "[bold red]",
                 "starting": "[yellow]",
                 "unknown": "[dim]",
             }.get(agent["status"], "")
@@ -683,7 +714,6 @@ class ClaudeAgentFarm:
         self.git_branch: Optional[str] = getattr(self, "git_branch", None)
         self.git_remote: str = getattr(self, "git_remote", "origin")
         self._cleanup_registered = False
-        self.state_file = self.project_path / MONITOR_STATE_FILE
         
         # Signal handling for double Ctrl-C
         self._last_sigint_time: Optional[float] = None
@@ -1495,11 +1525,9 @@ class ClaudeAgentFarm:
 
         # Launch monitor in controller window if monitoring is enabled
         if not self.no_monitor:
-            # Get the current script path
-            script_path = Path(__file__).resolve()
-            # Launch monitor mode in controller pane
-            monitor_cmd = f"cd {self.project_path} && {sys.executable} {script_path} monitor-only --path {self.project_path} --session {self.session}"
-            tmux_send(f"{self.session}:controller", monitor_cmd)
+            # In single-agent container mode, we don't need a separate monitor process
+            # The main process already monitors the agent
+            console.print("[yellow]Note: Monitor display is integrated into the main process[/yellow]")
 
         # Set up context-reset macro binding
         # Bind Ctrl+r in the controller window to send /reset to all agent panes
@@ -1932,8 +1960,6 @@ class ClaudeAgentFarm:
                                     # Commit and push
                                     self.commit_and_push()
 
-                # Write state to file for monitor process
-                self.write_monitor_state()
                 time.sleep(1)
                 check_counter += 1
 
@@ -2206,49 +2232,6 @@ class ClaudeAgentFarm:
         except Exception as e:
             console.print(f"[yellow]Warning: Could not generate HTML report: {e}[/yellow]")
     
-    def write_monitor_state(self) -> None:
-        """Write current monitor state to shared file"""
-        if not self.monitor:
-            return
-
-        def _serialise_agent(a: dict) -> dict:
-            """Convert datetime objects to ISO strings for JSON serialization"""
-            return {
-                **a,
-                "start_time": a["start_time"].isoformat(),
-                "last_activity": a["last_activity"].isoformat(),
-                "last_restart": a["last_restart"].isoformat() if a.get("last_restart") is not None else None,
-                "last_heartbeat": a["last_heartbeat"].isoformat() if a.get("last_heartbeat") is not None else None,
-                "cycle_start_time": a["cycle_start_time"].isoformat() if a.get("cycle_start_time") is not None else None,
-            }
-
-        state_data = {
-            "session": self.session,
-            "num_agents": self.agents,
-            "agents": {str(k): _serialise_agent(v) for k, v in self.monitor.agents.items()},
-            "start_time": self.monitor.start_time.isoformat(),
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # Write atomically with file locking
-        tmp_file = self.state_file.with_suffix(".tmp")
-        try:
-            with tmp_file.open("w") as f:
-                # Acquire exclusive lock
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                try:
-                    json.dump(state_data, f)
-                    f.flush()
-                    os.fsync(f.fileno())
-                finally:
-                    # Release lock
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-            # Atomic rename
-            tmp_file.replace(self.state_file)
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not write monitor state: {e}[/yellow]")
-            tmp_file.unlink(missing_ok=True)
 
     def _ensure_gitignore_entries(self) -> None:
         """Add Claude Agent Farm generated artefacts to the project's .gitignore (idempotent)"""
@@ -2262,7 +2245,6 @@ class ClaudeAgentFarm:
         patterns = [
             "# Claude Agent Farm",  # marker comment
             ".heartbeats/",
-            ".claude_agent_farm_state.json",
             ".claude_agent_farm_backups/",
             "agent_farm_report_*.html",
         ]
@@ -2431,89 +2413,6 @@ def main(
         farm.shutdown()
 
 
-@app.command(name="monitor-only", hidden=True)
-def monitor_only(
-    path: str = typer.Option(..., "--path", help="Absolute path to project root"),
-    session: str = typer.Option("claude_agents", "--session", "-s", help="tmux session name"),
-) -> None:
-    """Run monitor display only - internal command used by the orchestrator"""
-    project_path = Path(path).expanduser().resolve()
-    state_file = project_path / MONITOR_STATE_FILE
-
-    console.print(
-        Panel.fit(
-            f"[bold cyan]Claude Agent Farm Monitor[/bold cyan]\nSession: {session}\nPress Ctrl+C to exit monitor view",
-            border_style="cyan",
-            box=box.DOUBLE_EDGE,  # Use double-edge box for monitor panel
-        )
-    )
-
-    with Live(console=console, refresh_per_second=1) as live:
-        while True:
-            try:
-                if state_file.exists():
-                    # Use file locking when reading to avoid race conditions
-                    try:
-                        with state_file.open() as f:
-                            # Try to acquire shared lock (non-exclusive)
-                            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                            try:
-                                state_data = json.load(f)
-                            finally:
-                                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    except (IOError, OSError) as e:
-                        raise Exception(f"Failed to read state file: {e}") from e
-
-                    # Recreate table from state data
-                    table = Table(
-                        title=f"Claude Agent Farm - {datetime.now().strftime('%H:%M:%S')}",
-                        box=box.ROUNDED,  # Consistent box style with main status table
-                    )
-                    table.add_column("Agent", style="cyan", width=8)
-                    table.add_column("Status", style="green", width=10)
-                    table.add_column("Cycles", style="yellow", width=6)
-                    table.add_column("Context", style="magenta", width=8)
-                    table.add_column("Runtime", style="blue", width=12)
-                    table.add_column("Errors", style="red", width=6)
-
-                    agents = state_data.get("agents", {})
-
-                    for agent_id in sorted(int(k) for k in agents):
-                        agent = agents[str(agent_id)]
-                        agent_start = datetime.fromisoformat(agent["start_time"])
-                        runtime = str(datetime.now() - agent_start).split(".")[0]
-
-                        status_style = {
-                            "working": "[green]",
-                            "ready": "[cyan]",
-                            "idle": "[yellow]",
-                            "error": "[red]",
-                            "starting": "[yellow]",
-                            "unknown": "[dim]",
-                        }.get(agent["status"], "")
-
-                        table.add_row(
-                            f"Pane {agent_id:02d}",
-                            f"{status_style}{agent['status']}[/]",
-                            str(agent["cycles"]),
-                            f"{agent['last_context']}%",
-                            runtime,
-                            str(agent["errors"]),
-                        )
-
-                    live.update(table)
-                else:
-                    live.update("[yellow]Waiting for monitor data...[/yellow]")
-
-                time.sleep(1)
-
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                # Wrap error messages for monitor display
-                wrapped_error = textwrap.fill(f"Error reading state: {e}", width=60)
-                live.update(f"[red]{wrapped_error}[/red]")
-                time.sleep(1)
 
 
 @app.command(name="doctor")
