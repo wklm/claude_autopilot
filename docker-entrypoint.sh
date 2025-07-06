@@ -27,6 +27,19 @@ setup_user() {
         # If workspace is owned by root, use the claude user instead
         if [ "$WORKSPACE_UID" -eq 0 ]; then
             echo "Workspace is owned by root, switching to claude user"
+            
+            # Copy Claude configuration from mounted volume for claude user
+            if [ -f "/host-claude-config/.claude.json" ]; then
+                cp /host-claude-config/.claude.json /home/claude/.claude.json
+                chown claude:claude /home/claude/.claude.json
+            fi
+            
+            if [ -d "/host-claude-config/.claude" ]; then
+                cp -rp /host-claude-config/.claude /home/claude/.claude
+                chown -R claude:claude /home/claude/.claude
+                chmod 600 /home/claude/.claude/.credentials.json 2>/dev/null || true
+            fi
+            
             export HOME=/home/claude
             export USER=claude
             export CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
@@ -65,18 +78,22 @@ setup_user() {
             echo 'alias claude-code="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/$HOST_USER/.bashrc
         fi
         
-        # Copy Claude configuration to the new user's home
-        if [ -f "/home/claude/.claude.json" ]; then
-            cp /home/claude/.claude.json /home/$HOST_USER/.claude.json
+        # Copy Claude configuration from mounted volume (if available)
+        if [ -f "/host-claude-config/.claude.json" ]; then
+            cp /host-claude-config/.claude.json /home/$HOST_USER/.claude.json
             chown $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.claude.json
+        else
+            echo "Warning: Claude configuration file not found in mounted volume"
         fi
         
-        # Copy Claude session directory
-        if [ -d "/home/claude/.claude" ]; then
-            cp -rp /home/claude/.claude /home/$HOST_USER/.claude
+        # Copy Claude session directory from mounted volume
+        if [ -d "/host-claude-config/.claude" ]; then
+            cp -rp /host-claude-config/.claude /home/$HOST_USER/.claude
             chown -R $WORKSPACE_UID:$WORKSPACE_GID /home/$HOST_USER/.claude
             # Ensure credentials file has proper permissions
             chmod 600 /home/$HOST_USER/.claude/.credentials.json 2>/dev/null || true
+        else
+            echo "Warning: Claude session directory not found in mounted volume"
         fi
         
         # Create .config directory if it doesn't exist
@@ -138,10 +155,23 @@ show_help() {
 # Check if Claude is configured
 check_claude() {
     if [ ! -f "$HOME/.claude.json" ]; then
-        echo "Warning: Claude configuration not found at $HOME/.claude.json"
-        echo "Claude may need to be configured before use"
-        # Don't exit, just warn - Claude might be installed globally
+        echo "Error: Claude configuration not found at $HOME/.claude.json"
+        echo "Make sure Claude is configured on your host system and the configuration is mounted"
+        echo "The host configuration should be at ~/.claude.json and ~/.claude/"
+        echo ""
+        echo "To fix this:"
+        echo "1. Exit this container"
+        echo "2. Run 'claude' on your host system to configure it"
+        echo "3. Re-run the container - configuration will be mounted automatically"
+        return 1
     fi
+    
+    if [ ! -d "$HOME/.claude" ]; then
+        echo "Warning: Claude session directory not found at $HOME/.claude"
+        echo "You may need to authenticate when using Claude"
+    fi
+    
+    return 0
 }
 
 # Set up PATH for Flutter and Android SDK
@@ -300,7 +330,11 @@ fi
 setup_user "$@"
 
 # Check Claude installation
-check_claude
+if ! check_claude; then
+    echo ""
+    echo "Exiting due to missing Claude configuration"
+    exit 1
+fi
 
 # Check if we're in background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then

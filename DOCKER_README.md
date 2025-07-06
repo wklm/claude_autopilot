@@ -152,9 +152,17 @@ docker stop $(docker ps -q --filter name=ccfarm-)
 # Remove stopped containers
 docker rm $(docker ps -aq --filter name=ccfarm-)
 
+# Stop and remove all containers with one command
+./ccfarm-stopremove.sh
+
 # View container resource usage
 docker stats --no-stream $(docker ps -q --filter name=ccfarm-)
 ```
+
+The `ccfarm-stopremove.sh` script provides a convenient way to clean up all Claude Agent Farm containers at once. It will:
+- Stop all running ccfarm-* containers
+- Remove all ccfarm-* containers (both running and stopped)
+- Show a summary of what was cleaned up
 
 ## Customization
 

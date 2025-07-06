@@ -70,6 +70,16 @@ PROJECT_PATH="$(pwd)"
 # Get the real path to handle symlinks
 PROJECT_PATH="$(realpath "$PROJECT_PATH")"
 
+# Check if Claude configuration exists
+CLAUDE_CONFIG_WARNING=false
+if [ ! -f "$HOME/.claude.json" ] || [ ! -d "$HOME/.claude" ]; then
+    echo -e "${YELLOW}Warning: Claude configuration not found in your home directory${NC}"
+    echo -e "${YELLOW}The container may not work properly without Claude configuration${NC}"
+    echo -e "${YELLOW}Run 'claude' command on your host to set up configuration first${NC}"
+    echo ""
+    CLAUDE_CONFIG_WARNING=true
+fi
+
 # Function to run a single container
 run_container() {
     local container_num=$1
@@ -94,7 +104,13 @@ run_container() {
     local parent_dir=$(dirname "$PROJECT_PATH")
     docker_args+=("-e" "PARENT_DIR=$parent_dir")
     
-    # No need to mount Claude anymore - it's installed via npm
+    # Mount Claude configuration from host (read-only for security)
+    if [ -f "$HOME/.claude.json" ]; then
+        docker_args+=("-v" "$HOME/.claude.json:/host-claude-config/.claude.json:ro")
+    fi
+    if [ -d "$HOME/.claude" ]; then
+        docker_args+=("-v" "$HOME/.claude:/host-claude-config/.claude:ro")
+    fi
     
     # Check if prompt is a file or text
     if [ -f "$PROMPT" ]; then

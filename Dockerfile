@@ -80,18 +80,8 @@ RUN mkdir -p ${ANDROID_HOME} && \
 RUN useradd -m -s /bin/bash claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Copy Claude configuration (if exists) 
-COPY --chown=claude:claude claude.json /home/claude/.claude.json
-# Also copy to root's home for npm global installation
-COPY claude.json /root/.claude.json
-
-# Copy Claude session directory (if exists during build)
-# This includes API credentials and other session data
-COPY --chown=claude:claude .claude /home/claude/.claude
-# Also copy to root's home
-COPY .claude /root/.claude
-# Fix permissions on credentials file
-RUN chmod 600 /home/claude/.claude/.credentials.json /root/.claude/.credentials.json 2>/dev/null || true
+# Claude configuration will be mounted at runtime from host
+# This ensures configuration is always up-to-date and not baked into the image
 
 # Set up working directory
 WORKDIR /app

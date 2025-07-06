@@ -1,6 +1,5 @@
 #!/bin/bash
 # Build script for Claude Code Agent Farm Docker image
-# This script copies the Claude configuration before building
 
 set -e
 
@@ -12,47 +11,19 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}Building Claude Code Agent Farm Docker Image with Flutter${NC}"
 
-# Copy Claude configuration and session data
-CLAUDE_JSON_SRC="$HOME/.claude.json"
-CLAUDE_JSON_DEST="./claude.json"
-CLAUDE_DIR_SRC="$HOME/.claude"
-CLAUDE_DIR_DEST="./.claude"
-
-# Copy .claude.json if it exists
-if [ -f "$CLAUDE_JSON_SRC" ]; then
-    echo -e "${GREEN}Copying Claude configuration from $CLAUDE_JSON_SRC${NC}"
-    cp "$CLAUDE_JSON_SRC" "$CLAUDE_JSON_DEST"
+# Check if Claude is configured on host (just for information)
+if [ -f "$HOME/.claude.json" ] && [ -d "$HOME/.claude" ]; then
+    echo -e "${GREEN}Claude configuration detected on host${NC}"
+    echo -e "${GREEN}It will be mounted at runtime when you run containers${NC}"
 else
-    echo -e "${YELLOW}Warning: Claude configuration not found at $CLAUDE_JSON_SRC${NC}"
-    # Create empty file to prevent build failure
-    echo '{}' > "$CLAUDE_JSON_DEST"
+    echo -e "${YELLOW}Warning: Claude configuration not found in your home directory${NC}"
+    echo -e "${YELLOW}Make sure to configure Claude before running containers${NC}"
+    echo -e "${YELLOW}Run 'claude' command to set up your configuration${NC}"
 fi
-
-# Copy .claude directory if it exists
-if [ -d "$CLAUDE_DIR_SRC" ]; then
-    echo -e "${GREEN}Copying Claude session data from $CLAUDE_DIR_SRC${NC}"
-    # Remove existing copy if present
-    rm -rf "$CLAUDE_DIR_DEST" 2>/dev/null || true
-    # Copy preserving permissions
-    cp -rp "$CLAUDE_DIR_SRC" "$CLAUDE_DIR_DEST"
-else
-    echo -e "${YELLOW}Warning: Claude session directory not found at $CLAUDE_DIR_SRC${NC}"
-    echo -e "${YELLOW}The container will need manual Claude setup${NC}"
-fi
-
-# Claude will be installed via npm in the container
 
 # Build the Docker image
 echo -e "${GREEN}Building Docker image...${NC}"
 docker build -t claude-code-agent-farm:flutter .
-
-# Clean up temporary files
-if [ -f "$CLAUDE_JSON_DEST" ]; then
-    rm "$CLAUDE_JSON_DEST"
-fi
-if [ -d "$CLAUDE_DIR_DEST" ]; then
-    rm -rf "$CLAUDE_DIR_DEST"
-fi
 
 echo -e "${GREEN}Build complete!${NC}"
 echo ""
