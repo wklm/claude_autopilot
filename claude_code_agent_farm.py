@@ -524,23 +524,36 @@ class AgentMonitor:
         except Exception:
             return None
     
-    def needs_restart(self, agent_id: int) -> bool:
-        """Determine if an agent needs to be restarted"""
+    def needs_restart(self, agent_id: int) -> Optional[str]:
+        """Determine if an agent needs to be restarted and why
+
+        Returns:
+            None  - no restart needed
+            'context' - context nearly exhausted, use /clear
+            'error' - encountered errors or heartbeat stalled, full restart
+            'idle' - idle for too long, full restart
+        """
         agent = self.agents[agent_id]
-        
-        # Check heartbeat age - if older than 2 minutes, agent might be stuck
+
+        # Stalled heartbeat indicates the pane is likely hung
         heartbeat_age = self._check_heartbeat_age(agent_id)
         if heartbeat_age is not None and heartbeat_age > 120:
             console.print(f"[yellow]Agent {agent_id} heartbeat is {heartbeat_age:.0f}s old[/yellow]")
-            return True
+            return "error"
 
-        # Restart conditions
-        return bool(
-            agent["status"] == "error"
-            or agent["errors"] >= self.max_errors
-            or agent["status"] == "idle"
-            or agent["last_context"] <= self.context_threshold
-        )
+        # Low-context can often be resolved with /clear instead of a full restart
+        if agent["last_context"] <= self.context_threshold:
+            return "context"
+
+        # Hard failures or repeated errors → full restart
+        if agent["status"] == "error" or agent["errors"] >= self.max_errors:
+            return "error"
+
+        # Prolonged idleness → full restart so it picks up new work
+        if agent["status"] == "idle":
+            return "idle"
+
+        return None
 
     def get_status_table(self) -> Table:
         """Generate status table for all agents"""
@@ -601,7 +614,7 @@ class ClaudeAgentFarm:
     def __init__(
         self,
         path: str,
-        agents: int = 20,
+        agents: int = 6,
         session: str = "claude_agents",
         stagger: float = 10.0,  # Increased from 4.0 to prevent settings clobbering
         wait_after_cc: float = 15.0,  # Increased from 8.0 to ensure Claude Code is fully ready
@@ -1293,6 +1306,16 @@ class ClaudeAgentFarm:
         last_content = ""
         debug_shown = False
 
+        # ------------------------- Active probe setup ------------------------- #
+        # Some shell configurations use very minimal or custom prompts that the
+        # passive heuristics below cannot reliably detect.  To accommodate a
+        # wider variety of prompts we fall back to sending an `echo` command
+        # containing a unique marker and waiting for that marker to appear in
+        # the captured pane output.  These variables keep track of the probe
+        # state for the duration of the wait loop.
+        probe_attempted = False  # Whether we've sent the probe command yet
+        probe_marker: str = ""   # The unique string we expect to see echoed back
+
         # Get the last part of the project path for detection
         project_dir_name = self.project_path.name
 
@@ -1334,6 +1357,32 @@ class ClaudeAgentFarm:
                         console.print("[dim]Detected git prompt pattern[/dim]")
                         return True
                 last_content = content
+
+            # ------------------------------------------------------------------ #
+            # Active probe logic - short-circuit the function as soon as we see
+            # the unique probe marker in the pane output, which demonstrates
+            # that the shell is accepting and executing commands.
+            # ------------------------------------------------------------------ #
+            elapsed = time.time() - start_time
+
+            # 1) If we already sent a probe and the marker appears → ready.
+            if probe_attempted and probe_marker and probe_marker in content:
+                console.print(f"[dim]Pane {pane_target}: Shell responded to probe - ready[/dim]")
+                # Clear the temporary probe output so it does not clutter the pane
+                tmux_send(pane_target, "clear", enter=True, update_heartbeat=False)
+                return True
+
+            # 2) If passive detection has not succeeded within ~3 s, send probe.
+            if (not probe_attempted) and (elapsed > 3):
+                probe_attempted = True
+                from random import randint  # local import to avoid top-of-file churn
+                probe_marker = f"AGENT_FARM_READY_{randint(100000, 999999)}"
+                tmux_send(pane_target, f"echo {probe_marker}", enter=True, update_heartbeat=False)
+                # Give the shell a brief moment to execute the probe before we
+                # capture output again in the next loop iteration.
+                time.sleep(0.2)
+                continue  # Skip the remainder of this iteration
+
             time.sleep(0.2)
 
         # Check if we were interrupted
@@ -1497,20 +1546,20 @@ class ClaudeAgentFarm:
             tmux_send(f"{self.session}:controller", monitor_cmd)
 
         # Set up context-reset macro binding
-        # Bind Ctrl+r in the controller window to send /reset to all agent panes
+        # Bind Ctrl+r in the controller window to send /clear to all agent panes
         reset_cmd = ""
         for agent_id in range(self.agents):
             target_pane = self.pane_mapping.get(agent_id)
             if target_pane is not None:
-                # Send /reset to each agent pane
-                reset_cmd += f"send-keys -t {target_pane} '/reset' Enter \\; "
+                # Send /clear to each agent pane
+                reset_cmd += f"send-keys -t {target_pane} '/clear' Enter \\; "
         
         if reset_cmd:
             # Remove the trailing " \; "
             reset_cmd = reset_cmd[:-4]
             # Bind to Ctrl+r in the controller window
-            run(f"tmux bind-key -T root -n C-r \\; display-message 'Sending /reset to all agents...' \\; {reset_cmd}", quiet=True)
-            console.print("[green]✓ Context-reset macro bound to Ctrl+R (broadcasts /reset to all agents)[/green]")
+            run(f"tmux bind-key -T root -n C-r \\; display-message 'Sending /clear to all agents...' \\; {reset_cmd}", quiet=True)
+            console.print("[green]✓ Context-reset macro bound to Ctrl+R (broadcasts /clear to all agents)[/green]")
 
         # Register cleanup handler
         if not self._cleanup_registered:
@@ -1888,7 +1937,8 @@ class ClaudeAgentFarm:
                         self.monitor.check_agent(agent_id)
 
                         # Auto-restart if needed
-                        if self.auto_restart and self.monitor.needs_restart(agent_id):
+                        restart_reason = self.monitor.needs_restart(agent_id) if self.auto_restart else None
+                        if restart_reason:
                             agent = self.monitor.agents[agent_id]
 
                             # Implement exponential backoff
@@ -1899,15 +1949,21 @@ class ClaudeAgentFarm:
                                 if time_since_restart < backoff_time:
                                     continue  # Skip restart, still in backoff period
 
-                            console.print(
-                                f"[yellow]Restarting agent {agent_id} (attempt #{agent['restart_count'] + 1})...[/yellow]"
-                            )
-                            self.start_agent(agent_id, restart=True)
+                            if restart_reason == "context":
+                                console.print(
+                                    f"[yellow]Low context detected for agent {agent_id}, clearing context…[/yellow]"
+                                )
+                                self.clear_agent_context(agent_id)
+                            else:
+                                console.print(
+                                    f"[yellow]Restarting agent {agent_id} due to {restart_reason} (attempt #{agent['restart_count'] + 1})…[/yellow]"
+                                )
+                                self.start_agent(agent_id, restart=True)
 
-                            # Update restart tracking
-                            agent["restart_count"] += 1
-                            agent["last_restart"] = datetime.now()
-                            self.monitor.agents[agent_id] = agent
+                                # Update restart tracking only for full restarts
+                                agent["restart_count"] += 1
+                                agent["last_restart"] = datetime.now()
+                                self.monitor.agents[agent_id] = agent
                             
                             # Track restarts for reporting
                             self.agent_restart_count += 1
@@ -2271,6 +2327,55 @@ class ClaudeAgentFarm:
                 for p in missing:
                     f.write(p + "\n")
             console.print(f"[green]✓ Added {len(missing)} Claude Agent Farm pattern(s) to .gitignore[/green]")
+
+    def clear_agent_context(self, agent_id: int) -> None:
+        """Send /clear to the specified agent and re-inject the working prompt.
+
+        This avoids fully restarting Claude Code, preventing settings races
+        while still recovering context budget.
+        """
+        pane_target = self.pane_mapping.get(agent_id)
+        if not pane_target:
+            console.print(f"[red]Error: No pane mapping found for agent {agent_id}[/red]")
+            return
+
+        console.print(f"[yellow]Clearing context for agent {agent_id}…[/yellow]")
+
+        # Instruct Claude Code to compact its context
+        tmux_send(pane_target, "/clear")
+
+        # Give Claude a moment to process the command
+        for _ in range(10):  # ~2 s total, but abort early if shutting down
+            if not self.running:
+                return
+            time.sleep(0.2)
+
+        # Update bookkeeping so the monitor shows fresh state
+        if self.monitor:
+            agent = self.monitor.agents[agent_id]
+            agent["cycles"] += 1
+            agent["last_context"] = 100  # assume cleared
+            agent["last_activity"] = datetime.now()
+
+        # Re-inject the prompt with a unique seed so each cycle is distinct
+        seed = randint(100000, 999999)
+        dynamic_chunk_size = self._calculate_dynamic_chunk_size()
+        current_prompt = self.prompt_text
+        configured_chunk = getattr(self, "chunk_size", 50)
+        if dynamic_chunk_size != configured_chunk:
+            current_prompt = current_prompt.replace(f"{{{configured_chunk}}}", f"{{{dynamic_chunk_size}}}")
+            current_prompt = current_prompt.replace(f"{configured_chunk}", str(dynamic_chunk_size))
+
+        salted_prompt = re.sub(
+            r"random chunks(\b.*?\b)?",
+            lambda m: f"{m.group(0)} (instance-seed {seed})",
+            current_prompt,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+        tmux_send(pane_target, salted_prompt, enter=True)
+        console.print(f"[green]✓ Agent {agent_id:02d}: context cleared and prompt re-injected[/green]")
 
 
 # ─────────────────────────────── CLI Entry Point ──────────────────────────── #
