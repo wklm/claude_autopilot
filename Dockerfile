@@ -58,12 +58,34 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 # Install Claude Code CLI from npm
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install claude-auto-resume for API quota handling
+RUN git clone https://github.com/terryso/claude-auto-resume /opt/claude-auto-resume && \
+    chmod +x /opt/claude-auto-resume/claude-auto-resume.sh && \
+    ln -s /opt/claude-auto-resume/claude-auto-resume.sh /usr/local/bin/claude-auto-resume
+
+# Install claude-code-generic-hooks
+RUN git clone https://github.com/possibilities/claude-code-generic-hooks /opt/claude-hooks && \
+    chmod -R a+rX /opt/claude-hooks
+
+# Install tmux-composer-cli
+RUN npm install -g tmux-composer
+
 # Install Flutter SDK with world-readable permissions
 RUN git clone https://github.com/flutter/flutter.git -b stable ${FLUTTER_HOME} && \
     ${FLUTTER_HOME}/bin/flutter --version && \
     ${FLUTTER_HOME}/bin/flutter config --enable-web --no-analytics && \
     ${FLUTTER_HOME}/bin/flutter precache && \
-    chmod -R a+rX ${FLUTTER_HOME}
+    chmod -R a+rX ${FLUTTER_HOME} && \
+    # Make cache directories world-writable to avoid permission issues
+    mkdir -p ${FLUTTER_HOME}/.pub-cache && \
+    mkdir -p ${FLUTTER_HOME}/bin/cache && \
+    # Make all Flutter cache directories fully writable (777)
+    chmod -R 777 ${FLUTTER_HOME}/bin/cache && \
+    chmod -R 777 ${FLUTTER_HOME}/.pub-cache && \
+    # Also make the packages directory writable
+    chmod -R 777 ${FLUTTER_HOME}/packages || true && \
+    # Ensure the bin directory and all tools are executable
+    chmod -R a+x ${FLUTTER_HOME}/bin/* || true
 
 # Install Android SDK
 RUN mkdir -p ${ANDROID_HOME} && \

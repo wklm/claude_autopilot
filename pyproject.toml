@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-code-agent-farm"
-version = "1.0.0"
-description = "Orchestrate multiple Claude Code agents for parallel code fixing"
+version = "2.0.0"
+description = "Production-grade orchestration for multiple Claude Code agents with automatic API quota handling"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -13,12 +13,14 @@ authors = [
     { name = "Jeffrey Emanuel", email = "jeffrey.emanuel@gmail.com" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
@@ -57,7 +59,7 @@ all = [
 ]
 
 [project.scripts]
-claude-code-agent-farm = "claude_code_agent_farm:app"
+claude-code-agent-farm = "claude_code_agent_farm.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/Dicklesworthstone/claude_code_agent_farm"
@@ -67,9 +69,15 @@ Documentation = "https://github.com/Dicklesworthstone/claude_code_agent_farm#rea
 
 # Configure Hatchling
 [tool.hatch.build.targets.wheel]
-packages = ["claude_code_agent_farm.py"]
+packages = ["src/claude_code_agent_farm"]
 
 [tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 exclude = [
     "/.venv",
     "/.vscode",
@@ -81,14 +89,15 @@ exclude = [
     "/*.pyd",
     ".env",
     ".envrc",
-    "tests/*",
-    "docs/*",
+    "tests/",
+    "docs/",
     "*.log",
     ".DS_Store",
     ".direnv/",
     "*.swp",
     "*.swo",
     "*~",
+    "claude_code_agent_farm.py",  # Exclude old monolithic file
 ]
 
 # --- Tool Configurations ---

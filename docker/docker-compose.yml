@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  flutter-mcp:
+    build:
+      context: ./flutter-mcp
+      dockerfile: Dockerfile
+    container_name: flutter-mcp-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - claude-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+
+  ccfarm-agent:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    image: claude-code-agent-farm
+    depends_on:
+      flutter-mcp:
+        condition: service_healthy
+    networks:
+      - claude-network
+    volumes:
+      - ${HOST_PROJECT_PATH}:/workspace
+      - ${HOME}/.claude.json:/home/claude/.claude.json:ro
+      - ${HOME}/.claude:/home/claude/.claude:ro
+    environment:
+      - MCP_SERVER_URL=http://flutter-mcp:8000
+      - MCP_ENABLED=true
+      - CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - PROMPT_FILE=${PROMPT_FILE:-}
+      - PROMPT_TEXT=${PROMPT_TEXT:-}
+      - CONFIG_FILE=${CONFIG_FILE:-/app/configs/flutter_config.json}
+      - AUTO_RESTART=${AUTO_RESTART:-true}
+    command: ["--config", "${CONFIG_FILE}"]
+    stdin_open: true
+    tty: true
+
+networks:
+  claude-network:
+    driver: bridge
+    name: claude-mcp-network

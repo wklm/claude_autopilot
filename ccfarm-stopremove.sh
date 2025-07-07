@@ -56,9 +56,35 @@ done
 echo -e "${GREEN}✓ All containers removed${NC}"
 echo ""
 
+# Check for MCP server and stop it
+MCP_REMOVED=false
+if docker ps -a --format '{{.Names}}' | grep -q '^flutter-mcp-server$'; then
+    echo -e "${YELLOW}Stopping Flutter MCP server...${NC}"
+    docker stop flutter-mcp-server >/dev/null 2>&1 || true
+    docker rm flutter-mcp-server >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓ Flutter MCP server removed${NC}"
+    MCP_REMOVED=true
+    echo ""
+fi
+
+# Clean up MCP network if no other containers are using it
+if docker network ls --format '{{.Name}}' | grep -q '^claude-mcp-network$'; then
+    # Check if any containers are still connected to the network
+    CONNECTED=$(docker network inspect claude-mcp-network --format '{{len .Containers}}' 2>/dev/null || echo "0")
+    if [ "$CONNECTED" -eq 0 ]; then
+        echo -e "${YELLOW}Removing unused MCP network...${NC}"
+        docker network rm claude-mcp-network >/dev/null 2>&1 || true
+        echo -e "${GREEN}✓ MCP network removed${NC}"
+        echo ""
+    fi
+fi
+
 # Final summary
 echo -e "${GREEN}Cleanup complete!${NC}"
 echo -e "Removed ${BLUE}$TOTAL_COUNT${NC} container(s)"
+if $MCP_REMOVED; then
+    echo -e "Stopped Flutter MCP server"
+fi
 
 # Optional: Show disk space freed
 if command -v docker &> /dev/null; then

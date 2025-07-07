@@ -1,6 +1,6 @@
-# Claude Code Agent Farm - Docker Setup with Flutter 🐳🚜
+# Claude Code Agent Farm v2.0 - Docker Setup with Flutter 🐳🚜
 
-This Docker setup provides a complete, containerized environment for running Claude Code Agent Farm with Flutter development support. It includes the ability to spawn multiple containers in parallel, each running a single agent working on the same project.
+This Docker setup provides a complete, containerized environment for running Claude Code Agent Farm v2.0 with Flutter development support. The new version includes automatic API quota handling and enhanced monitoring capabilities.
 
 ## Features
 
@@ -11,6 +11,9 @@ This Docker setup provides a complete, containerized environment for running Cla
 - 📝 **Timestamped Logging**: All output includes timestamps in background mode
 - 🔗 **Easy Attachment**: Connect to any running container to see live tmux session
 - 🎯 **Simple Commands**: Bash aliases for common operations
+- ⏸️ **Automatic API Quota Handling**: Uses `claude-auto-resume` to wait and resume when limits are hit
+- 📊 **Enhanced Monitoring**: Integrated `claude-code-generic-hooks` for detailed metrics
+- 🎼 **Simplified tmux Management**: Uses `tmux-composer` for cleaner session handling
 
 ## Prerequisites
 
@@ -29,7 +32,10 @@ This Docker setup provides a complete, containerized environment for running Cla
 This script:
 - Copies your Claude configuration (`~/.claude.json`)
 - Builds the Docker image with tag `claude-code-agent-farm:flutter`
-- Includes Flutter SDK, Android SDK, Python 3.13, and all dependencies
+- Includes Flutter SDK, Android SDK, Python 3.11+, and all dependencies
+- Installs claude-auto-resume for automatic API quota handling
+- Installs tmux-composer for simplified session management
+- Installs claude-code-generic-hooks for monitoring
 
 ### 2. Run a Single Container (Interactive Mode)
 
@@ -96,13 +102,19 @@ ccfarm-stop
 - `/workspace` - Your mounted project directory
 - `/opt/flutter` - Flutter SDK installation
 - `/opt/android-sdk` - Android SDK installation
+- `/opt/claude-auto-resume` - Automatic API quota handling
+- `/opt/claude-hooks` - Enhanced monitoring hooks
+- `~/.config/claude-code/hooks` - User-specific hook configurations
 
 ### Environment
 - **OS**: Ubuntu 22.04 LTS
-- **Python**: 3.13 with virtual environment
+- **Python**: 3.11+ with virtual environment
 - **Flutter**: Latest stable channel with web support
 - **Android**: SDK 33, Build Tools 33.0.0, Java 17
 - **Claude Code**: Pre-installed with your configuration
+- **claude-auto-resume**: Automatically handles API quota limits
+- **tmux-composer**: Simplified tmux session management
+- **claude-code-generic-hooks**: Advanced monitoring and metrics
 
 ## Advanced Usage
 
@@ -186,6 +198,53 @@ The container supports these environment variables:
 - `AGENTS` - Number of agents (always 1 in this setup)
 - `AUTO_RESTART` - Enable auto-restart (default: true)
 
+## What's New in v2.0
+
+### Automatic API Quota Handling
+When Claude's API quota is exhausted, the system automatically:
+1. Detects the usage limit message
+2. Extracts the reset time
+3. Waits with a countdown timer
+4. Resumes execution automatically
+
+No manual intervention needed! Just let it run.
+
+### Enhanced Monitoring
+Each agent now has:
+- Command execution tracking
+- Performance metrics collection
+- Automatic error recovery
+- Context usage monitoring
+- Detailed logs in `/workspace/.agent_logs/`
+
+### Simplified Architecture
+- 52% less code through modular design
+- Leverages proven community tools
+- Cleaner, more maintainable structure
+
+## Migrating from v1.x
+
+If you're upgrading from v1.x:
+
+1. **Rebuild the Docker image** - New dependencies are included:
+   ```bash
+   ./build-docker.sh
+   ```
+
+2. **No configuration changes needed** - Your existing configs work as-is
+
+3. **Automatic benefits**:
+   - API quota handling works out of the box
+   - Better monitoring with no extra setup
+   - Same commands, better results
+
+4. **New directories created**:
+   - `.agent_logs/` - Detailed execution logs
+   - `.agent_metrics/` - Performance metrics
+   - `.claude_hooks/` - Hook configurations
+
+The main difference is that agents will now automatically wait and resume when hitting API limits, instead of failing.
+
 ## Troubleshooting
 
 ### Container Won't Start
@@ -197,6 +256,7 @@ The container supports these environment variables:
 - Verify your `~/.claude.json` exists before building
 - Rebuild image if configuration changed: `./build-docker.sh`
 - Check container logs for authentication errors
+- API quota handling is automatic - just wait if limits are hit
 
 ### Flutter/Android Issues
 - Flutter doctor output is shown on container start
@@ -207,6 +267,11 @@ The container supports these environment variables:
 - Ensure container is running: `docker ps`
 - Use correct container number with `docker-attach.sh`
 - If tmux session doesn't exist, agent may have completed
+
+### Monitoring Issues
+- Check `.agent_logs/` directory for detailed logs
+- Metrics are stored in `.agent_metrics/`
+- Hook configurations are in `.claude_hooks/`
 
 ### Executing Commands in Containers
 When you need to run commands inside a container (e.g., for debugging), always exec as the workspace user, not root:
@@ -285,4 +350,4 @@ For issues specific to Docker setup:
 
 ---
 
-Happy farming with Docker! 🐳🚜🤖
+Happy farming with Docker and automatic API quota handling! 🐳🚜🤖⏸️

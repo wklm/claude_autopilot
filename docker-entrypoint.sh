@@ -59,6 +59,13 @@ setup_user() {
             echo 'alias claude-code="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/hostuser/.bashrc
             # Also set up cc alias to override system cc
             echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/hostuser/.bashrc
+            # Set up Flutter and Android SDK paths
+            echo 'export FLUTTER_HOME=/opt/flutter' >> /home/hostuser/.bashrc
+            echo 'export ANDROID_HOME=/opt/android-sdk' >> /home/hostuser/.bashrc
+            echo 'export PATH="${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:/home/claude/.venv/bin:${PATH}"' >> /home/hostuser/.bashrc
+            echo 'export PUB_CACHE="$HOME/.pub-cache"' >> /home/hostuser/.bashrc
+            echo 'export FLUTTER_STORAGE_BASE_URL="https://storage.googleapis.com"' >> /home/hostuser/.bashrc
+            echo 'export FLUTTER_CACHE_DIR="$HOME/.flutter/cache"' >> /home/hostuser/.bashrc
         fi
         
         # Get the username for the UID
@@ -76,6 +83,16 @@ setup_user() {
         fi
         if ! grep -q "alias claude-code=" /home/$HOST_USER/.bashrc 2>/dev/null; then
             echo 'alias claude-code="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/$HOST_USER/.bashrc
+        fi
+        
+        # Add Flutter and Android SDK paths if they don't exist
+        if ! grep -q "FLUTTER_HOME=/opt/flutter" /home/$HOST_USER/.bashrc 2>/dev/null; then
+            echo 'export FLUTTER_HOME=/opt/flutter' >> /home/$HOST_USER/.bashrc
+            echo 'export ANDROID_HOME=/opt/android-sdk' >> /home/$HOST_USER/.bashrc
+            echo 'export PATH="${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:/home/claude/.venv/bin:${PATH}"' >> /home/$HOST_USER/.bashrc
+            echo 'export PUB_CACHE="$HOME/.pub-cache"' >> /home/$HOST_USER/.bashrc
+            echo 'export FLUTTER_STORAGE_BASE_URL="https://storage.googleapis.com"' >> /home/$HOST_USER/.bashrc
+            echo 'export FLUTTER_CACHE_DIR="$HOME/.flutter/cache"' >> /home/$HOST_USER/.bashrc
         fi
         
         # Copy Claude configuration from mounted volume (if available)
@@ -108,6 +125,15 @@ setup_user() {
         # Make sure the user can access necessary directories
         chown -R $WORKSPACE_UID:$WORKSPACE_GID /app 2>/dev/null || true
         chmod -R a+rX /home/claude/.venv 2>/dev/null || true
+        
+        # Create user-specific Flutter directories
+        sudo -u $HOST_USER mkdir -p /home/$HOST_USER/.pub-cache 2>/dev/null || true
+        sudo -u $HOST_USER mkdir -p /home/$HOST_USER/.flutter/cache 2>/dev/null || true
+        
+        # Ensure Flutter permissions are correct
+        chmod -R 777 /opt/flutter/bin/cache 2>/dev/null || true
+        chmod -R 777 /opt/flutter/.pub-cache 2>/dev/null || true
+        chmod -R 777 /opt/flutter/packages 2>/dev/null || true
         
         # Switch to the new user for the rest of the script
         exec sudo -u $HOST_USER -E "$0" "$@"
@@ -179,6 +205,12 @@ export FLUTTER_HOME=/opt/flutter
 export ANDROID_HOME=/opt/android-sdk
 export PATH="${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
 
+# Ensure Flutter is accessible by all users
+export PATH="/opt/flutter/bin:${PATH}"
+
+# Add Python virtual environment to PATH
+export PATH="/home/claude/.venv/bin:${PATH}"
+
 # Activate virtual environment
 if [ -f "/home/claude/.venv/bin/activate" ]; then
     source /home/claude/.venv/bin/activate
@@ -193,10 +225,39 @@ git config --global --add safe.directory /opt/flutter
 # When running with --user flag, we can't use sudo
 # Flutter SDK should already have correct permissions from Docker build
 
+# Make Flutter cache directory writable if we're root
+if [ "$EUID" -eq 0 ]; then
+    mkdir -p /opt/flutter/.pub-cache 2>/dev/null || true
+    chmod -R 777 /opt/flutter/bin/cache 2>/dev/null || true
+    chmod -R 777 /opt/flutter/.pub-cache 2>/dev/null || true
+    chmod -R 777 /opt/flutter/packages 2>/dev/null || true
+    # Ensure the bin directory itself is accessible
+    chmod -R a+rX /opt/flutter/bin 2>/dev/null || true
+    chmod -R a+x /opt/flutter/bin/* 2>/dev/null || true
+else
+    # If not root, create user-specific Flutter cache
+    export FLUTTER_ROOT=/opt/flutter
+    export PUB_CACHE="$HOME/.pub-cache"
+    mkdir -p "$PUB_CACHE" 2>/dev/null || true
+    # Also create Flutter's internal cache directory in user's home
+    mkdir -p "$HOME/.flutter" 2>/dev/null || true
+    export FLUTTER_STORAGE_BASE_URL="https://storage.googleapis.com"
+    export FLUTTER_CACHE_DIR="$HOME/.flutter/cache"
+    mkdir -p "$FLUTTER_CACHE_DIR" 2>/dev/null || true
+fi
+
 # Default values
 # Use environment variable if set, otherwise default to /workspace
 PROJECT_PATH="${PROJECT_PATH:-/workspace}"
 ARGS=()
+
+# Export MCP configuration if provided
+if [[ -n "$MCP_ENABLED" ]]; then
+    export MCP_ENABLED
+fi
+if [[ -n "$MCP_SERVER_URL" ]]; then
+    export MCP_SERVER_URL
+fi
 
 # Parse command line arguments first (before user switch)
 # This ensures we have all the variables set before switching users
@@ -373,7 +434,8 @@ run_with_timestamps() {
 # Run Flutter doctor to show environment status
 {
     echo "Flutter Environment Status:"
-    flutter doctor -v
+    # Try to run flutter doctor, but don't fail if there are permission issues
+    flutter doctor -v 2>&1 || echo "Flutter doctor encountered issues (this is normal in containerized environments)"
     echo "========================================"
     echo ""
 } | { [[ "${BACKGROUND_MODE}" == "true" ]] && timestamp || cat; }
@@ -400,7 +462,17 @@ export TMP="$TEMP_DIR"
 
 # Execute with or without timestamps based on background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then
-    exec python /app/claude_code_agent_farm.py "${ARGS[@]}" 2>&1 | timestamp
+    # Export the timestamp function so it's available in the subshell
+    export -f timestamp
+    # Use bash with the timestamp function properly
+    exec bash -c "
+        timestamp() {
+            while IFS= read -r line; do
+                echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] \$line\"
+            done
+        }
+        python /app/claude_code_agent_farm.py ${ARGS[*]} 2>&1 | timestamp
+    "
 else
     exec python /app/claude_code_agent_farm.py "${ARGS[@]}"
 fi
