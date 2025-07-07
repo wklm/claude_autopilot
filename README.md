@@ -19,7 +19,7 @@ Claude Code Agent Farm is a powerful orchestration framework that runs multiple 
 - 📊 **Smart Monitoring**: Real-time dashboard with context warnings, heartbeat tracking, and tmux pane titles
 - 🔄 **Auto-Recovery**: Automatically restarts agents when needed with adaptive idle timeout based on work patterns
 - 📈 **Progress Tracking**: Git commits with rich diff summaries and comprehensive HTML run reports
-- 🔄 **Context Management**: One-key broadcast of /reset command to all agents (Ctrl+R)
+- 🔄 **Context Management**: Agents automatically clear their own context when nearing limits, plus one-key broadcast of /clear to all agents (Ctrl+R)
 - ⚙️ **Highly Configurable**: JSON configs with variable substitution and dynamic chunk sizing
 - 🖥️ **Flexible Viewing**: Multiple tmux viewing modes with shell completion support
 - 🔒 **Safe Operation**: Automatic settings backup/restore with size-based rotation, file locking, atomic operations
@@ -471,7 +471,7 @@ Create your own configuration:
 - **agents**: Number of agents to run (default: 20)
 - **max_agents**: Maximum allowed agents (default: 50)
 - **auto_restart**: Enable automatic agent restart
-- **context_threshold**: Restart when context drops below this %
+- **context_threshold**: Auto-clear context when it drops below this %
 - **git_branch**: Optional specific branch to commit to
 - **git_remote**: Remote to push to (default: origin)
 
@@ -517,7 +517,7 @@ Features:
 Advanced:
   --prompt-file PATH      Custom prompt file
   --config PATH           JSON configuration file
-  --context-threshold N    Restart agent when context ≤ N% (default: 20)
+  --context-threshold N    Auto-clear context when context ≤ N% (default: 20)
   --idle-timeout SECONDS   Mark agent idle after N seconds (default: 60)
   --max-errors N           Disable agent after N errors (default: 3)
   --commit-every N         Commit after every N regeneration cycles
@@ -667,7 +667,7 @@ The Python script includes a real-time monitoring dashboard that shows:
 ### Context Warnings
 
 Each tmux pane displays context warnings in its title bar:
-- ⚠️ **Critical** (≤20%): Agent will restart soon
+- ⚠️ **Critical** (≤20%): Agent will clear context soon
 - ⚡ **Low** (≤30%): Context running low
 - Normal percentage display for healthy levels
 
@@ -699,7 +699,7 @@ tmux attach -t claude_agents:controller  # Dashboard only
 
 ### Context Reset Macro
 
-Press `Ctrl+R` from any tmux window to broadcast the `/reset` command to all agents simultaneously. This frees up context across all agents with a single keystroke, useful when multiple agents are running low on context.
+Press `Ctrl+R` from any tmux window to broadcast the `/clear` command to all agents simultaneously. This frees up context across all agents with a single keystroke, useful when multiple agents are running low on context.
 
 ### Agent States
 
@@ -715,7 +715,7 @@ Press `Ctrl+R` from any tmux window to broadcast the `/reset` command to all age
 When `--auto-restart` is enabled:
 - Monitors agent health continuously via heartbeat files
 - Restarts agents that hit errors, go idle, or have stale heartbeats (>2 minutes)
-- Monitors context percentage and restarts when below threshold
+- Monitors context percentage and clears context when below threshold
 - Adaptive idle timeout adjusts based on agent work patterns
   - Tracks cycle completion times across all agents
   - Sets timeout to 3× median cycle time (bounded 30s-600s)
@@ -1010,8 +1010,7 @@ Configure custom git branches and remotes in your config:
   - Automatically halves when previous launch succeeds (minimum: baseline)
   - Doubles only when previous launch fails (maximum: 60s)
   - Results in faster startup when system is healthy
-- **Context Threshold**: Lower values (15-20%) restart agents sooner
-  - Visual warnings appear in tmux pane titles
+- **Context Threshold**: Lower values (15-20%) clear context sooner
 - **Idle Timeout**: Adjust based on task complexity
 - **Check Interval**: Balance between responsiveness and CPU usage
 - **Heartbeat Monitoring**: Detects stuck agents (>2 minutes since last pulse)
@@ -1052,6 +1051,11 @@ Configure custom git branches and remotes in your config:
 - Intelligently waits for shell prompts before sending commands
 - `--fast-start` flag skips prompt detection for faster launches
 - Handles both bash and zsh prompts
+- Robust, multi-layer readiness check before sending commands:
+  1. Passive heuristics that recognise common prompt symbols and current directory names
+  2. Active probe fallback that sends a one-off `echo` with a unique marker and waits for the response – works even with minimal or heavily customised prompts
+  Works seamlessly with bash, zsh, fish, and other POSIX-compatible shells
+  `--fast-start` flag remains available to skip detection entirely for advanced users who want the quickest possible launch
 
 #### User Confirmations
 - Interruptible confirmation prompts (Ctrl+C uses default)
