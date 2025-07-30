@@ -665,6 +665,7 @@ class ClaudeAgentFarm:
         fast_start: bool = False,
         full_backup: bool = False,
         commit_every: Optional[int] = None,
+        container_mode: bool = False,
     ):
         # Store all parameters
         self.path = path
@@ -688,6 +689,7 @@ class ClaudeAgentFarm:
         self.fast_start = fast_start
         self.full_backup = full_backup
         self.commit_every = commit_every
+        self.container_mode = container_mode
 
         # Initialize pane mapping
         self.pane_mapping: Dict[int, str] = {}
@@ -2019,6 +2021,45 @@ class ClaudeAgentFarm:
                 time.sleep(1)
                 check_counter += 1
 
+    def run_single_agent_container_mode(self) -> None:
+        """Run a single agent directly without tmux in container mode"""
+        console.print("[cyan]Running in container mode - executing claude directly[/cyan]")
+        
+        # Build the claude command
+        cmd_parts = ["claude", "--dangerously-skip-permissions"]
+        
+        # Read prompt from file if specified
+        prompt_text = None
+        if self.prompt_file:
+            try:
+                with open(self.prompt_file, 'r') as f:
+                    prompt_text = f.read().strip()
+            except Exception as e:
+                console.print(f"[red]Error reading prompt file: {e}[/red]")
+                sys.exit(1)
+        
+        # Add the prompt as the last argument
+        if prompt_text:
+            cmd_parts.append(prompt_text)
+        
+        # Convert command parts to string for display
+        cmd = " ".join(shlex.quote(part) for part in cmd_parts)
+        
+        console.print(f"[green]Executing: {cmd}[/green]")
+        
+        # Run claude directly and stream output
+        try:
+            result = subprocess.run(cmd_parts, check=False)
+            
+            # Exit with the same code as claude
+            sys.exit(result.returncode)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted by user[/yellow]")
+            sys.exit(1)
+        except Exception as e:
+            console.print(f"[red]Error running claude: {e}[/red]")
+            sys.exit(1)
+
     def run(self) -> None:
         """Main orchestration flow"""
         os.chdir(self.project_path)
@@ -2030,7 +2071,10 @@ class ClaudeAgentFarm:
         banner_text = "[bold cyan]Claude Code Agent Farm[/bold cyan]\n"
         banner_text += f"Project: {wrapped_path}\n"
         banner_text += f"Agents: {self.agents}\n"
-        banner_text += f"Session: {self.session}\n"
+        if self.container_mode and self.agents == 1:
+            banner_text += f"Mode: Container (Direct Execution)\n"
+        else:
+            banner_text += f"Session: {self.session}\n"
         banner_text += f"Auto-restart: {'enabled' if self.auto_restart else 'disabled'}"
         if self.commit_every:
             banner_text += f"\nIncremental commits: every {self.commit_every} cycles"
@@ -2059,28 +2103,34 @@ class ClaudeAgentFarm:
             # Execute workflow steps
             self.regenerate_problems()
             self.commit_and_push()
-            self.setup_tmux_session()
+            
+            # Handle container mode with single agent
+            if self.container_mode and self.agents == 1:
+                self.run_single_agent_container_mode()
+            else:
+                # Normal tmux-based multi-agent mode
+                self.setup_tmux_session()
 
-            # Initialize monitor
-            self.monitor = AgentMonitor(
-                self.session,
-                self.agents,
-                self.pane_mapping,
-                context_threshold=self.context_threshold,
-                idle_timeout=self.idle_timeout,
-                max_errors=self.max_errors,
-                project_path=self.project_path,
-            )
+                # Initialize monitor
+                self.monitor = AgentMonitor(
+                    self.session,
+                    self.agents,
+                    self.pane_mapping,
+                    context_threshold=self.context_threshold,
+                    idle_timeout=self.idle_timeout,
+                    max_errors=self.max_errors,
+                    project_path=self.project_path,
+                )
 
-            # Launch agents
-            self.launch_agents()
+                # Launch agents
+                self.launch_agents()
 
-            # Start monitoring
-            self.monitor_loop()
+                # Start monitoring
+                self.monitor_loop()
 
-            # Attach to session if requested
-            if self.attach and not self.no_monitor:
-                run(f"tmux attach-session -t {self.session}", check=False)
+                # Attach to session if requested
+                if self.attach and not self.no_monitor:
+                    run(f"tmux attach-session -t {self.session}", check=False)
 
         except KeyboardInterrupt:
             # Don't print anything here - let the main handler deal with it
@@ -2088,6 +2138,11 @@ class ClaudeAgentFarm:
 
     def shutdown(self) -> None:
         """Clean shutdown of all agents"""
+        # Skip most shutdown logic in container mode
+        if self.container_mode and self.agents == 1:
+            console.print("\n[yellow]Container mode shutdown complete[/yellow]")
+            return
+            
         console.print("\n[yellow]Shutting down agents...[/yellow]")
 
         for i in range(self.agents):
@@ -2451,6 +2506,9 @@ def main(
     commit_every: Optional[int] = typer.Option(
         None, "--commit-every", help="Commit after every N regeneration cycles", rich_help_panel="Advanced Options"
     ),
+    container_mode: bool = typer.Option(
+        False, "--container-mode", help="Run in container mode (single agent, no tmux)", rich_help_panel="Advanced Options", envvar="CLAUDE_FARM_CONTAINER_MODE"
+    ),
 ) -> None:
     """
     Claude Code Agent Farm - Parallel code fixing automation
@@ -2501,6 +2559,7 @@ def main(
         fast_start=fast_start,
         full_backup=full_backup,
         commit_every=commit_every,
+        container_mode=container_mode,
     )
 
     try:
