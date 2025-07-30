@@ -1,0 +1,43 @@
+{
+  "users": [
+    {
+      "localId": "test-user-1",
+      "email": "test@example.com",
+      "emailVerified": true,
+      "passwordHash": "fakeHash",
+      "salt": "fakeSalt",
+      "displayName": "Test User",
+      "photoUrl": "",
+      "createdAt": "1609459200000",
+      "lastLoginAt": "1609459200000",
+      "providerUserInfo": [
+        {
+          "providerId": "password",
+          "email": "test@example.com",
+          "federatedId": "test@example.com",
+          "rawId": "test@example.com"
+        }
+      ]
+    },
+    {
+      "localId": "admin-user-1",
+      "email": "admin@example.com",
+      "emailVerified": true,
+      "passwordHash": "fakeHash",
+      "salt": "fakeSalt",
+      "displayName": "Admin User",
+      "photoUrl": "",
+      "createdAt": "1609459200000",
+      "lastLoginAt": "1609459200000",
+      "customAttributes": "{\"role\":\"admin\"}",
+      "providerUserInfo": [
+        {
+          "providerId": "password",
+          "email": "admin@example.com",
+          "federatedId": "admin@example.com",
+          "rawId": "admin@example.com"
+        }
+      ]
+    }
+  ]
+}
