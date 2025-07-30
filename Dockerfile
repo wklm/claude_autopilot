@@ -55,8 +55,8 @@ RUN apt-get update && \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/
 
-# Install Claude Code CLI from npm
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code CLI from npm and Firebase CLI
+RUN npm install -g @anthropic-ai/claude-code firebase-tools
 
 # Install claude-auto-resume for API quota handling
 RUN git clone https://github.com/terryso/claude-auto-resume /opt/claude-auto-resume && \
@@ -110,13 +110,19 @@ WORKDIR /app
 
 # Copy project files
 COPY --chown=claude:claude README.md ./
-COPY --chown=claude:claude pyproject.toml uv.lock ./
+COPY --chown=claude:claude pyproject.toml ./
 COPY --chown=claude:claude claude_code_agent_farm.py ./
 COPY --chown=claude:claude view_agents.sh ./
 COPY --chown=claude:claude configs/ ./configs/
 COPY --chown=claude:claude prompts/ ./prompts/
 COPY --chown=claude:claude best_practices_guides/ ./best_practices_guides/
 COPY --chown=claude:claude tool_setup_scripts/ ./tool_setup_scripts/
+
+# Copy Firebase configuration files
+COPY --chown=claude:claude firebase.json ./
+COPY --chown=claude:claude .firebaserc ./
+COPY --chown=claude:claude scripts/ ./scripts/
+COPY --chown=claude:claude seed-data/ ./seed-data/
 
 # Switch to non-root user
 USER claude
@@ -160,8 +166,8 @@ ENV AUTO_RESTART="true"
 # Skip Claude permission prompts
 ENV CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
 
-# Expose any ports if needed (Flutter web runs on 8080 by default)
-EXPOSE 8080
+# Expose ports for Flutter web and Firebase emulators
+EXPOSE 8080 4000 5000 5001 8085 9000 9099 9199 9299 4400
 
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
