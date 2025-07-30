@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  claude-agent-farm:
+    build: .
+    image: claude-code-agent-farm:latest
+    container_name: claude-agent-farm-firebase
+    environment:
+      - PROMPT_FILE=${PROMPT_FILE:-}
+      - PROMPT_TEXT=${PROMPT_TEXT:-}
+      - CONFIG_FILE=${CONFIG_FILE:-/app/configs/flutter_config.json}
+      - AGENTS=${AGENTS:-1}
+      - AUTO_RESTART=${AUTO_RESTART:-true}
+      - FIREBASE_AUTH_EMULATOR_HOST=localhost:9099
+      - FIRESTORE_EMULATOR_HOST=localhost:8080
+      - FIREBASE_DATABASE_EMULATOR_HOST=localhost:9000
+      - FIREBASE_STORAGE_EMULATOR_HOST=localhost:9199
+      - FIREBASE_HOSTING_EMULATOR_HOST=localhost:5000
+      - PUBSUB_EMULATOR_HOST=localhost:8085
+      - FIREBASE_CONFIG={"projectId":"claude-agent-farm-dev"}
+      - GCLOUD_PROJECT=claude-agent-farm-dev
+    ports:
+      # Flutter web
+      - "8080:8080"
+      # Firebase Emulator UI
+      - "4000:4000"
+      # Firebase Hosting
+      - "5000:5000"
+      # Firebase Functions
+      - "5001:5001"
+      # Firebase Firestore
+      - "8081:8080"  # Map to 8081 to avoid conflict with Flutter web
+      # Firebase Pub/Sub
+      - "8085:8085"
+      # Firebase Realtime Database
+      - "9000:9000"
+      # Firebase Auth
+      - "9099:9099"
+      # Firebase Storage
+      - "9199:9199"
+      # Firebase Eventarc
+      - "9299:9299"
+      # Firebase Emulator Hub
+      - "4400:4400"
+    volumes:
+      # Project workspace
+      - ${PROJECT_DIR:-./test_project}:/home/claude/workspace
+      # Claude configuration
+      - ${HOME}/.config/claude:/home/claude/.config/claude:ro
+      # Firebase emulator data persistence
+      - firebase-emulator-data:/home/claude/.cache/firebase
+      # Firebase config persistence
+      - ./firebase.json:/app/firebase.json:ro
+      - ./.firebaserc:/app/.firebaserc:ro
+      # Scripts
+      - ./scripts:/app/scripts:ro
+      # Seed data
+      - ./seed-data:/app/seed-data:ro
+    working_dir: /home/claude/workspace
+    stdin_open: true
+    tty: true
+    command: ["bash"]
+
+volumes:
+  firebase-emulator-data:
+    driver: local
