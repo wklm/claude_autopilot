@@ -41,5 +41,20 @@ else
     USER_HOME="/home/hostuser"
 fi
 
-# Use docker exec to run view_agents.sh for an interactive menu as the correct user
-docker exec -it -u "$WORKSPACE_UID:$WORKSPACE_GID" -e "HOME=$USER_HOME" "$CONTAINER_NAME" /app/view_agents.sh
+# Check if tmux session exists (multi-agent mode) or not (single-agent container mode)
+TMUX_SESSION_EXISTS=$(docker exec "$CONTAINER_NAME" bash -c "tmux has-session -t claude_agents 2>/dev/null && echo true || echo false")
+
+if [ "$TMUX_SESSION_EXISTS" = "false" ]; then
+    echo -e "${YELLOW}Container is running in single-agent mode (no tmux session)${NC}"
+    echo -e "${YELLOW}Attaching directly to container shell...${NC}"
+    echo ""
+    echo -e "${GREEN}Tips:${NC}"
+    echo -e "• Use 'docker logs -f $CONTAINER_NAME' to see agent output"
+    echo -e "• Exit with: Ctrl+D or 'exit'"
+    echo ""
+    # Attach to container shell
+    docker exec -it -u "$WORKSPACE_UID:$WORKSPACE_GID" -e "HOME=$USER_HOME" "$CONTAINER_NAME" /bin/bash
+else
+    # Use docker exec to run view_agents.sh for an interactive menu as the correct user
+    docker exec -it -u "$WORKSPACE_UID:$WORKSPACE_GID" -e "HOME=$USER_HOME" "$CONTAINER_NAME" /app/view_agents.sh
+fi
