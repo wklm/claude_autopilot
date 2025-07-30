@@ -460,6 +460,11 @@ export TMPDIR="$TEMP_DIR"
 export TEMP="$TEMP_DIR"
 export TMP="$TEMP_DIR"
 
+# Set container mode for single agent
+if [[ "${AGENTS:-1}" == "1" ]]; then
+    export CLAUDE_FARM_CONTAINER_MODE=true
+fi
+
 # Execute with or without timestamps based on background mode
 if [[ "${BACKGROUND_MODE}" == "true" ]]; then
     # Export the timestamp function so it's available in the subshell
