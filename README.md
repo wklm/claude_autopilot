@@ -46,6 +46,43 @@ alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"
 
 This alias will be configured automatically by the setup script.
 
+### Docker Aliases
+
+After setup, you'll have these convenient Docker aliases available. To set them up automatically:
+
+```bash
+./setup-docker-aliases.sh
+source ~/.bashrc  # or ~/.zshrc for zsh users
+```
+
+Available aliases:
+
+```bash
+# Build/rebuild the Docker image
+ccfarm-build
+
+# Run containers (wrapper for run-docker.sh)
+ccfarm-run "Fix all type errors"
+
+# Attach to a running container
+ccfarm-attach 1
+
+# Stop all ccfarm containers
+ccfarm-stop
+
+# Stop and remove all ccfarm containers
+ccfarm-stopremove
+
+# List all running ccfarm containers
+ccfarm-ps
+
+# View logs from a specific container
+ccfarm-logs ccfarm-1
+
+# View all containers in tmux grid
+ccfarm-agents
+```
+
 ## 🚀 Quick Start
 
 ### 1. Clone and Setup
@@ -113,6 +150,23 @@ cp best_practices_guides/NEXTJS15_BEST_PRACTICES.md /path/to/project/best_practi
 
 # Run with best practices config
 claude-code-agent-farm --path /path/to/project --config configs/nextjs_best_practices_config.json
+```
+
+#### Using Docker Containers
+```bash
+# Build the Docker image
+./build-docker.sh
+
+# Run a single agent (container mode)
+cd /path/to/project
+../claude_code_agent_farm/run-docker.sh "Fix all type errors"
+
+# Run multiple agents in background
+./run-docker.sh -b 5 "Implement best practices"
+
+# Use MCP for Flutter projects (auto-detected)
+cd /path/to/flutter/project
+../claude_code_agent_farm/run-docker.sh "Add null safety"
 ```
 
 ## 🛠️ Tool Setup Scripts
@@ -227,6 +281,38 @@ This is an optional convenience tool for viewing the tmux session:
 Think of it like this:
 - **Python script** = Your car engine (does all the work)
 - **Shell script** = Your dashboard camera (lets you see what's happening)
+
+### Docker Container Mode
+
+The project includes full Docker support for running agents in isolated containers:
+
+#### Single Agent Container Mode
+When running with a single agent, the system automatically switches to container mode:
+- Executes claude directly without tmux overhead
+- Integrated monitoring in the main process
+- Perfect for CI/CD pipelines or focused work
+
+```bash
+# Run a single agent in container mode
+./run-docker.sh "Fix all type errors"
+
+# Or with Docker directly
+docker run -v /project:/project claude-code-agent-farm:flutter --agents 1
+```
+
+#### Background Multi-Container Mode
+Run multiple containers in the background:
+
+```bash
+# Start 5 containers working in parallel
+./run-docker.sh -b 5 "Fix all type errors"
+
+# Attach to a specific container
+./docker-attach.sh 2  # Attach to container 2
+
+# View all container logs
+docker logs -f ccfarm-1
+```
 
 ### Hidden Commands
 
@@ -755,6 +841,140 @@ Features:
 - Complete run statistics for documentation or pull requests
 - Automatic generation on graceful shutdown
 
+## 🐳 Docker Support
+
+The project includes comprehensive Docker support for running agents in isolated containers with Flutter/MCP integration.
+
+### Docker Features
+
+- **Container Mode**: Single agents run directly without tmux overhead
+- **Background Mode**: Run multiple containers in parallel
+- **MCP Integration**: Automatic Flutter MCP server for Flutter projects
+- **Host Path Preservation**: Maintains exact host paths for Claude trust
+- **Auto User Mapping**: Matches container user to host file permissions
+- **Claude Config Mounting**: Automatically mounts host Claude configuration
+
+### Docker Commands
+
+```bash
+# Build the Docker image
+./build-docker.sh
+
+# Run single container interactively
+./run-docker.sh "Fix all type errors"
+
+# Run with a prompt file
+./run-docker.sh prompt.txt
+
+# Run multiple containers in background
+./run-docker.sh -b 5 "Fix all type errors"
+
+# Attach to a background container
+./docker-attach.sh 1  # Attach to container 1
+
+# Stop and remove all containers
+./ccfarm-stopremove.sh
+
+# View all containers in tmux
+./ccfarm-agents.sh
+```
+
+### Docker Environment Variables
+
+- `AGENTS`: Number of agents (default: 1)
+- `PROMPT_TEXT`: Direct prompt text
+- `PROMPT_FILE`: Path to prompt file
+- `CONFIG_FILE`: Configuration file path
+- `AUTO_RESTART`: Enable auto-restart (default: true)
+- `MCP_ENABLED`: Enable MCP server (auto-detected for Flutter)
+- `BACKGROUND_MODE`: Run in background with timestamps
+- `CONTAINER_NUM`: Container number (for background mode)
+
+### Container Mode vs Multi-Agent Mode
+
+When `AGENTS=1`, the system automatically:
+- Skips tmux session creation
+- Runs claude directly in the container
+- Provides integrated monitoring output
+- Exits cleanly without tmux cleanup
+
+This makes single-agent containers perfect for:
+- CI/CD pipelines
+- Focused single-task work
+- Testing and debugging
+- Resource-constrained environments
+
+## 🔥 Firebase Emulator Support
+
+The project includes integrated Firebase Emulator Suite support for local development and testing without requiring Firebase credentials.
+
+### Firebase Emulator Features
+
+- **Complete Emulator Suite**: Auth, Firestore, Realtime Database, Storage, Functions, Hosting, Pub/Sub
+- **Docker Integration**: Emulators run inside containers with proper port mapping
+- **Persistent Data**: Emulator data persists across container restarts
+- **Seed Data**: Pre-configured test users and data for consistent development
+- **Health Monitoring**: Built-in health check scripts for all emulators
+- **Backup/Restore**: Easy backup and restore of emulator state
+
+### Quick Start with Firebase Emulators
+
+```bash
+# Using Docker Compose (recommended)
+docker-compose up -d
+
+# Start emulators manually
+./scripts/start-emulators.sh
+
+# Check emulator health
+./tests/emulator-health-check.js
+
+# Access Emulator UI
+open http://localhost:4000
+```
+
+### Firebase Emulator Ports
+
+- **4000**: Emulator UI (web interface)
+- **5000**: Hosting emulator
+- **5001**: Functions emulator
+- **8080**: Firestore emulator (mapped to 8081 in Docker to avoid Flutter conflict)
+- **8085**: Pub/Sub emulator
+- **9000**: Realtime Database emulator
+- **9099**: Auth emulator
+- **9199**: Storage emulator
+- **9299**: Eventarc emulator
+- **4400**: Emulator Hub
+
+### Working with Emulator Data
+
+```bash
+# Backup current emulator state
+./scripts/emulator-backup.sh
+
+# Restore from backup
+./scripts/emulator-restore.sh ./backups/emulator_20240130_120000
+
+# Set environment for emulator usage
+source .env.emulator
+```
+
+### Firebase Configuration
+
+The project includes:
+- `firebase.json`: Emulator configuration with all services
+- `.firebaserc`: Project aliasing for development
+- `seed-data/`: Pre-configured test users and sample data
+- Environment variables automatically configured in Docker
+
+### Integration with Claude Agents
+
+Firebase emulators are automatically available to all Claude agents running in containers:
+- No authentication required
+- Isolated from production Firebase
+- Consistent test data across all agents
+- Perfect for testing Firebase-dependent features
+
 ## 💡 Usage Examples
 
 ### Quick Test Run
@@ -892,10 +1112,20 @@ claude_code_agent_farm/
 ├── claude_code_agent_farm.py    # Main orchestrator
 ├── view_agents.sh               # Tmux viewer utility
 ├── setup.sh                     # Automated setup
+├── setup-docker-aliases.sh      # Docker alias setup
 ├── pyproject.toml              # Python project configuration
 ├── uv.lock                     # Locked dependencies
 ├── .envrc                      # direnv configuration
 ├── .gitignore                  # Git ignore patterns
+├── Dockerfile                   # Docker image definition
+├── docker-entrypoint.sh         # Docker entrypoint script
+├── build-docker.sh              # Docker build script
+├── run-docker.sh                # Docker run wrapper
+├── docker-attach.sh             # Attach to containers
+├── ccfarm-stopremove.sh         # Stop/remove containers
+├── ccfarm-agents.sh             # View containers in tmux
+├── cc-wrapper.sh                # Claude wrapper for Docker
+├── DOCKER_README.md             # Docker documentation
 ├── configs/                     # 33 configuration files
 │   ├── nextjs_config.json      # Next.js bug fixing
 │   ├── python_config.json      # Python bug fixing
@@ -1148,3 +1378,18 @@ MIT License - see [LICENSE](LICENSE) file
 | Prompt Templates | 37 |
 | Best Practices Guides | 35 |
 | Tool Setup Scripts | 24 |
+| Docker Scripts | 6 |
+| Docker Aliases | 9 |
+
+### Docker Quick Reference
+
+| Command | Description |
+|---------|-------------|
+| `ccfarm-build` | Build/rebuild Docker image |
+| `ccfarm-run` | Run containers (cd's to agent farm dir) |
+| `ccfarm-attach` | Attach to running container |
+| `ccfarm-stop` | Stop all ccfarm containers |
+| `ccfarm-stopremove` | Stop and remove all containers |
+| `ccfarm-ps` | List running ccfarm containers |
+| `ccfarm-logs` | View container logs |
+| `ccfarm-agents` | View all containers in tmux |
