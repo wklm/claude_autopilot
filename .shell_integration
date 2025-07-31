@@ -1,0 +1,366 @@
+#!/bin/bash
+# Shell integration for Claude Flutter Firebase Agent
+# This file provides enhanced shell integration features
+
+# ========================================
+# Prompt Integration
+# ========================================
+
+# Function to get agent status for prompt
+cffa_prompt_status() {
+    if command -v claude-flutter-agent &> /dev/null; then
+        local status=$(claude-flutter-agent status 2>/dev/null | grep -oE "(RUNNING|WORKING|ERROR|USAGE_LIMIT|STOPPED)" | head -1)
+        case "$status" in
+            "RUNNING"|"WORKING")
+                echo "🤖"  # Robot emoji for running
+                ;;
+            "ERROR")
+                echo "❌"  # X for error
+                ;;
+            "USAGE_LIMIT")
+                echo "⏸️"   # Pause for usage limit
+                ;;
+            *)
+                echo ""    # Nothing when stopped
+                ;;
+        esac
+    fi
+}
+
+# Example PS1 integration for bash
+# Add this to your .bashrc to show agent status in prompt:
+# PS1='$(cffa_prompt_status) \[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+
+# ========================================
+# Directory Navigation
+# ========================================
+
+# Auto-detect Carenji project and offer to start agent
+cffa_cd() {
+    builtin cd "$@"
+    if [ -f "pubspec.yaml" ] && grep -q "carenji" pubspec.yaml 2>/dev/null; then
+        echo "📱 Detected Carenji project!"
+        if ! claude-flutter-agent status 2>/dev/null | grep -q "RUNNING"; then
+            read -p "Start Claude Flutter Agent for Carenji? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                cffa-carenji
+            fi
+        fi
+    fi
+}
+
+# Uncomment to enable auto-detection:
+# alias cd='cffa_cd'
+
+# ========================================
+# Smart Commands
+# ========================================
+
+# Smart test runner - detects test type from current directory
+cffa_smart_test() {
+    local current_dir=$(basename "$PWD")
+    case "$current_dir" in
+        "unit")
+            echo "Running unit tests..."
+            cffa-test-unit
+            ;;
+        "integration")
+            echo "Running integration tests..."
+            cffa-test-int
+            ;;
+        "e2e")
+            echo "Running e2e tests..."
+            pytest . -v
+            ;;
+        "tests")
+            echo "Running all tests..."
+            cffa-test
+            ;;
+        *)
+            echo "Running tests from project root..."
+            cffa-test
+            ;;
+    esac
+}
+
+alias cffa-smart-test='cffa_smart_test'
+
+# ========================================
+# Session Management
+# ========================================
+
+# Save current agent session
+cffa_save_session() {
+    local session_name="${1:-$(date +%Y%m%d_%H%M%S)}"
+    local session_dir="$HOME/.claude-flutter-agent/sessions/$session_name"
+    
+    mkdir -p "$session_dir"
+    
+    # Capture tmux pane
+    tmux capture-pane -t claude-flutter-agent:0 -p > "$session_dir/pane_content.txt"
+    
+    # Save current status
+    claude-flutter-agent status > "$session_dir/status.txt"
+    
+    # Copy logs
+    cp -r "$HOME/.claude-flutter-agent/logs/"* "$session_dir/" 2>/dev/null || true
+    
+    echo "Session saved to: $session_dir"
+}
+
+alias cffa-save='cffa_save_session'
+
+# Restore agent session
+cffa_restore_session() {
+    local session_name="$1"
+    if [ -z "$session_name" ]; then
+        echo "Available sessions:"
+        ls -1 "$HOME/.claude-flutter-agent/sessions/" 2>/dev/null || echo "No saved sessions"
+        return 1
+    fi
+    
+    local session_dir="$HOME/.claude-flutter-agent/sessions/$session_name"
+    if [ -d "$session_dir" ]; then
+        echo "Restoring session: $session_name"
+        cat "$session_dir/pane_content.txt" 2>/dev/null || true
+        echo "---"
+        cat "$session_dir/status.txt" 2>/dev/null || true
+    else
+        echo "Session not found: $session_name"
+        return 1
+    fi
+}
+
+alias cffa-restore='cffa_restore_session'
+
+# ========================================
+# Workflow Shortcuts
+# ========================================
+
+# Complete Carenji development workflow
+cffa_carenji_workflow() {
+    echo "Starting Carenji development workflow..."
+    
+    # 1. Check environment
+    echo "1. Checking environment..."
+    flutter doctor
+    firebase --version
+    
+    # 2. Start Firebase emulators
+    echo "2. Starting Firebase emulators..."
+    fb-start &
+    sleep 5
+    
+    # 3. Start agent
+    echo "3. Starting Claude Flutter Agent..."
+    cffa-carenji
+}
+
+alias cffa-workflow='cffa_carenji_workflow'
+
+# Quick fix workflow
+cffa_quickfix() {
+    local issue="${1:-Fix any Flutter analyze issues}"
+    echo "Running quick fix for: $issue"
+    
+    # Run Flutter analyze
+    flutter analyze
+    
+    # Start agent with fix prompt if issues found
+    if [ $? -ne 0 ]; then
+        cffa-custom "$issue"
+    else
+        echo "✓ No issues found!"
+    fi
+}
+
+alias cffa-fix='cffa_quickfix'
+
+# ========================================
+# Monitoring Functions
+# ========================================
+
+# Dashboard view
+cffa_dashboard() {
+    clear
+    while true; do
+        echo "=== Claude Flutter Firebase Agent Dashboard ==="
+        echo "Time: $(date)"
+        echo ""
+        
+        # Agent status
+        echo "Agent Status:"
+        cffa-status-color
+        echo ""
+        
+        # Tmux sessions
+        echo "Active Sessions:"
+        tmux list-sessions 2>/dev/null | grep -E "(claude|flutter)" || echo "  No active sessions"
+        echo ""
+        
+        # Firebase status
+        echo "Firebase Emulators:"
+        if pgrep -f "firebase.*emulators" > /dev/null; then
+            echo "  ✓ Running"
+            echo "  UI: http://localhost:4000"
+        else
+            echo "  ✗ Not running"
+        fi
+        echo ""
+        
+        # Recent logs
+        echo "Recent Activity:"
+        tail -n 5 ~/.claude-flutter-agent/logs/*.log 2>/dev/null | sed 's/^/  /'
+        
+        echo ""
+        echo "Press Ctrl+C to exit"
+        sleep 5
+        clear
+    done
+}
+
+alias cffa-dashboard='cffa_dashboard'
+
+# ========================================
+# Git Integration
+# ========================================
+
+# Commit with agent assistance
+cffa_commit() {
+    local files_changed=$(git status --porcelain | wc -l)
+    if [ $files_changed -eq 0 ]; then
+        echo "No changes to commit"
+        return 1
+    fi
+    
+    echo "Files changed: $files_changed"
+    git status --short
+    
+    read -p "Would you like Claude to help write the commit message? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        cffa-custom "Write a commit message for these changes: $(git diff --staged --stat)"
+    else
+        git commit
+    fi
+}
+
+alias cffa-commit='cffa_commit'
+
+# ========================================
+# Debugging Helpers
+# ========================================
+
+# Debug mode - verbose output
+cffa_debug() {
+    export CLAUDE_AGENT_DEBUG=1
+    export CLAUDE_AGENT_LOG_LEVEL=DEBUG
+    echo "Debug mode enabled"
+    cffa "$@"
+}
+
+alias cffa-debug='cffa_debug'
+
+# Trace tmux commands
+cffa_trace() {
+    echo "Tracing tmux commands..."
+    tmux set-option -g remain-on-exit on
+    tmux set-option -g history-limit 50000
+    echo "Tmux tracing enabled. Run cffa-trace-off to disable."
+}
+
+alias cffa-trace-on='cffa_trace'
+
+cffa_trace_off() {
+    tmux set-option -g remain-on-exit off
+    echo "Tmux tracing disabled"
+}
+
+alias cffa-trace-off='cffa_trace_off'
+
+# ========================================
+# Performance Monitoring
+# ========================================
+
+# Monitor resource usage
+cffa_perf() {
+    echo "Monitoring Claude Flutter Firebase Agent performance..."
+    
+    # Find agent processes
+    local pids=$(pgrep -f "claude-flutter-agent|flutter_agent_monitor" | tr '\n' ',' | sed 's/,$//')
+    
+    if [ -n "$pids" ]; then
+        # Use top to monitor specific PIDs
+        top -p "$pids"
+    else
+        echo "No agent processes found"
+    fi
+}
+
+alias cffa-perf='cffa_perf'
+
+# ========================================
+# Auto-completion Helpers
+# ========================================
+
+# Project-specific prompts
+_cffa_carenji_prompts() {
+    echo "Implement medication reminder feature"
+    echo "Add family portal authentication"
+    echo "Create vital signs dashboard"
+    echo "Fix failing tests"
+    echo "Improve test coverage to 80%"
+    echo "Add offline support for patient data"
+    echo "Implement staff scheduling algorithm"
+    echo "Add real-time notifications"
+}
+
+# Quick prompt selection
+cffa_prompt_menu() {
+    echo "Select a Carenji development task:"
+    select prompt in $(_cffa_carenji_prompts) "Custom prompt" "Cancel"; do
+        case $prompt in
+            "Custom prompt")
+                read -p "Enter custom prompt: " custom_prompt
+                cffa-custom "$custom_prompt"
+                break
+                ;;
+            "Cancel")
+                break
+                ;;
+            *)
+                cffa-custom "$prompt"
+                break
+                ;;
+        esac
+    done
+}
+
+alias cffa-menu='cffa_prompt_menu'
+
+# ========================================
+# Environment Info
+# ========================================
+
+cffa_info() {
+    echo "Claude Flutter Firebase Agent Environment"
+    echo "========================================"
+    echo "Project Root: /home/wojtek/dev/claude_code_agent_farm"
+    echo "Carenji Path: /home/wojtek/dev/carenji"
+    echo "Config File: ${CLAUDE_AGENT_CONFIG:-~/.claude-flutter-agent/config.yaml}"
+    echo ""
+    echo "Versions:"
+    echo "  Python: $(python3 --version 2>&1)"
+    echo "  Flutter: $(flutter --version 2>&1 | head -1)"
+    echo "  Firebase: $(firebase --version 2>&1)"
+    echo "  Docker: $(docker --version 2>&1)"
+    echo "  Tmux: $(tmux -V 2>&1)"
+    echo ""
+    echo "Agent Status:"
+    cffa-status-color
+}
+
+alias cffa-info='cffa_info'
+
+echo "Shell integration loaded. Enhanced features available!"

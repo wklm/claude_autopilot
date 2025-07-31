@@ -1,0 +1,408 @@
+name: Test Claude Flutter Firebase Agent
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.10'
+  FLUTTER_VERSION: '3.16.0'
+  FIREBASE_CLI_VERSION: '12.0.0'
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort mypy
+          pip install -r requirements.txt
+      
+      - name: Run flake8
+        run: flake8 claude_code_agent_farm tests --max-line-length=100
+      
+      - name: Check black formatting
+        run: black --check claude_code_agent_farm tests
+      
+      - name: Check import sorting
+        run: isort --check-only claude_code_agent_farm tests
+      
+      - name: Run mypy
+        run: mypy claude_code_agent_farm --ignore-missing-imports
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Run unit tests
+        run: |
+          pytest tests/unit -v --cov=claude_code_agent_farm --cov-report=xml
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unit-tests-py${{ matrix.python-version }}
+          name: Unit Tests Python ${{ matrix.python-version }}
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Run integration tests (non-Docker)
+        run: |
+          pytest tests/integration -v -m "not docker" --cov=claude_code_agent_farm --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: integration-tests
+          name: Integration Tests
+
+  docker-tests:
+    name: Docker Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: claude-flutter-firebase-agent:test
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Run Docker integration tests
+        run: |
+          pytest tests/integration -v -m docker --cov=claude_code_agent_farm --cov-report=xml
+      
+      - name: Run Docker-based E2E tests
+        run: |
+          pytest tests/e2e -v -m docker --cov=claude_code_agent_farm --cov-report=xml --cov-append
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: docker-tests
+          name: Docker Tests
+      
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: [integration-tests, docker-tests]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+      
+      - name: Install Firebase CLI
+        run: |
+          curl -sL https://firebase.tools | bash
+          firebase --version
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Run E2E tests (non-Docker)
+        run: |
+          pytest tests/e2e -v -m "not docker" -m "not slow" --cov=claude_code_agent_farm --cov-report=xml
+        env:
+          CLAUDE_PROJECT_PATH: /tmp/test_carenji
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: e2e-tests
+          name: E2E Tests
+
+  carenji-specific-tests:
+    name: Carenji-Specific Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Run Carenji-specific tests
+        run: |
+          pytest tests -v -m carenji --cov=claude_code_agent_farm --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: carenji-tests
+          name: Carenji Tests
+
+  firebase-tests:
+    name: Firebase Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install Firebase CLI
+        run: |
+          curl -sL https://firebase.tools | bash
+          firebase --version
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Start Firebase emulators
+        run: |
+          # Create minimal firebase.json for emulators
+          echo '{
+            "emulators": {
+              "auth": {"port": 9099},
+              "firestore": {"port": 8080},
+              "storage": {"port": 9199}
+            }
+          }' > firebase.json
+          
+          # Start emulators in background
+          firebase emulators:start --only auth,firestore,storage --project test &
+          
+          # Wait for emulators to be ready
+          sleep 10
+      
+      - name: Run Firebase tests
+        run: |
+          pytest tests -v -m firebase --cov=claude_code_agent_farm --cov-report=xml
+        env:
+          FIREBASE_EMULATOR_HOST: localhost
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: firebase-tests
+          name: Firebase Tests
+
+  build-package:
+    name: Build and Test Package
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+      
+      - name: Build package
+        run: python -m build
+      
+      - name: Check package
+        run: |
+          twine check dist/*
+          
+      - name: Test installation
+        run: |
+          pip install dist/*.whl
+          claude-flutter-agent --version
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-package
+          path: dist/
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [
+      lint,
+      unit-tests,
+      integration-tests,
+      docker-tests,
+      e2e-tests,
+      carenji-specific-tests,
+      firebase-tests,
+      build-package
+    ]
+    if: always()
+    
+    steps:
+      - name: Check test results
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Function to check job status
+          check_status() {
+            if [ "$1" == "success" ]; then
+              echo "✅ $2" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ $2" >> $GITHUB_STEP_SUMMARY
+            fi
+          }
+          
+          check_status "${{ needs.lint.result }}" "Lint"
+          check_status "${{ needs.unit-tests.result }}" "Unit Tests"
+          check_status "${{ needs.integration-tests.result }}" "Integration Tests"
+          check_status "${{ needs.docker-tests.result }}" "Docker Tests"
+          check_status "${{ needs.e2e-tests.result }}" "E2E Tests"
+          check_status "${{ needs.carenji-specific-tests.result }}" "Carenji Tests"
+          check_status "${{ needs.firebase-tests.result }}" "Firebase Tests"
+          check_status "${{ needs.build-package.result }}" "Package Build"
+          
+          # Overall status
+          if [ "${{ contains(needs.*.result, 'failure') }}" == "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Some tests failed!**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+          fi

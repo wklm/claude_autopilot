@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-code-agent-farm"
-version = "2.0.0"
-description = "Production-grade orchestration for multiple Claude Code agents with automatic API quota handling"
+name = "claude-flutter-firebase-agent"
+version = "1.0.0"
+description = "Specialized Claude agent for Flutter app development with Firebase backend - includes emulators, MCP docs, and automatic usage limit handling"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -22,10 +22,11 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Quality Assurance",
-    "Topic :: Software Development :: Testing",
     "Topic :: System :: Monitoring",
     "Topic :: Utilities",
+    "Topic :: Software Development :: Build Tools",
+    "Framework :: Flutter",
+    "Topic :: Database :: Front-Ends",
     "Typing :: Typed",
 ]
 
@@ -33,6 +34,8 @@ classifiers = [
 dependencies = [
     "typer>=0.15.0",
     "rich>=13.7.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -59,13 +62,13 @@ all = [
 ]
 
 [project.scripts]
-claude-code-agent-farm = "claude_code_agent_farm.cli:app"
+claude-flutter-agent = "claude_code_agent_farm.flutter_agent_cli:app"
 
 [project.urls]
-Homepage = "https://github.com/Dicklesworthstone/claude_code_agent_farm"
-Repository = "https://github.com/Dicklesworthstone/claude_code_agent_farm"
-Issues = "https://github.com/Dicklesworthstone/claude_code_agent_farm/issues"
-Documentation = "https://github.com/Dicklesworthstone/claude_code_agent_farm#readme"
+Homepage = "https://github.com/Dicklesworthstone/claude-flutter-firebase-agent"
+Repository = "https://github.com/Dicklesworthstone/claude-flutter-firebase-agent"
+Issues = "https://github.com/Dicklesworthstone/claude-flutter-firebase-agent/issues"
+Documentation = "https://github.com/Dicklesworthstone/claude-flutter-firebase-agent#readme"
 
 # Configure Hatchling
 [tool.hatch.build.targets.wheel]

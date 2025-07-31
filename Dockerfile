@@ -1,16 +1,14 @@
-# Claude Code Agent Farm with Flutter Environment
-FROM node:20-bookworm
+# Claude Flutter Firebase Agent for Carenji Development
+# This Docker image provides a complete environment for AI-assisted 
+# Flutter development with Firebase backend for the carenji healthcare app
+
+FROM ubuntu:22.04
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Set up Flutter environment variables
-ENV FLUTTER_HOME=/opt/flutter
-ENV ANDROID_HOME=/opt/android-sdk
-ENV PATH="${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}"
-
-# Install system dependencies
+# Install base dependencies
 RUN apt-get update && apt-get install -y \
     # Basic tools
     curl \
@@ -19,158 +17,143 @@ RUN apt-get update && apt-get install -y \
     unzip \
     xz-utils \
     zip \
-    tmux \
-    sudo \
-    jq \
-    # Flutter dependencies
-    libglu1-mesa \
-    clang \
+    # Build tools
+    build-essential \
     cmake \
     ninja-build \
     pkg-config \
-    libgtk-3-dev \
-    # Android SDK dependencies
-    openjdk-17-jdk \
-    # Python 3.13 dependencies
-    software-properties-common \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    libncursesw5-dev \
-    libxml2-dev \
-    libxmlsec1-dev \
-    libffi-dev \
-    liblzma-dev \
+    # Python for scripts
+    python3 \
+    python3-pip \
+    python3-venv \
+    # Terminal tools
+    tmux \
+    htop \
+    nano \
+    vim \
+    # Networking tools
+    net-tools \
+    iputils-ping \
+    # Required for Flutter
+    libglu1-mesa \
+    libgtk-3-0 \
+    libstdc++6 \
+    # Clean up
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python 3 (Debian has 3.11 which is sufficient)
-RUN apt-get update && \
-    apt-get install -y python3 python3-dev python3-venv python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+# Install Node.js (required for Firebase CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install uv package manager
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/
+# Install Firebase CLI
+RUN npm install -g firebase-tools
 
-# Install Claude Code CLI from npm and Firebase CLI
-RUN npm install -g @anthropic-ai/claude-code firebase-tools
-
-# Install claude-auto-resume for API quota handling
-RUN git clone https://github.com/terryso/claude-auto-resume /opt/claude-auto-resume && \
-    chmod +x /opt/claude-auto-resume/claude-auto-resume.sh && \
-    ln -s /opt/claude-auto-resume/claude-auto-resume.sh /usr/local/bin/claude-auto-resume
-
-# Install claude-code-generic-hooks
-RUN git clone https://github.com/possibilities/claude-code-generic-hooks /opt/claude-hooks && \
-    chmod -R a+rX /opt/claude-hooks
-
-# Install tmux-composer-cli
-RUN npm install -g tmux-composer
-
-# Install Flutter SDK with world-readable permissions
-RUN git clone https://github.com/flutter/flutter.git -b stable ${FLUTTER_HOME} && \
-    ${FLUTTER_HOME}/bin/flutter --version && \
-    ${FLUTTER_HOME}/bin/flutter config --enable-web --no-analytics && \
-    ${FLUTTER_HOME}/bin/flutter precache && \
-    chmod -R a+rX ${FLUTTER_HOME} && \
-    # Make cache directories world-writable to avoid permission issues
-    mkdir -p ${FLUTTER_HOME}/.pub-cache && \
-    mkdir -p ${FLUTTER_HOME}/bin/cache && \
-    # Make all Flutter cache directories fully writable (777)
-    chmod -R 777 ${FLUTTER_HOME}/bin/cache && \
-    chmod -R 777 ${FLUTTER_HOME}/.pub-cache && \
-    # Also make the packages directory writable
-    chmod -R 777 ${FLUTTER_HOME}/packages || true && \
-    # Ensure the bin directory and all tools are executable
-    chmod -R a+x ${FLUTTER_HOME}/bin/* || true
-
-# Install Android SDK
-RUN mkdir -p ${ANDROID_HOME} && \
-    cd ${ANDROID_HOME} && \
-    wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip && \
-    unzip -q cmdline-tools.zip && \
-    rm cmdline-tools.zip && \
-    mkdir -p cmdline-tools/latest && \
-    mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true && \
-    yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true && \
-    ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
-
-# Create non-root user
+# Create claude user
 RUN useradd -m -s /bin/bash claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Claude configuration will be mounted at runtime from host
-# This ensures configuration is always up-to-date and not baked into the image
-
-# Set up working directory
-WORKDIR /app
-
-# Copy project files
-COPY --chown=claude:claude README.md ./
-COPY --chown=claude:claude pyproject.toml ./
-COPY --chown=claude:claude claude_code_agent_farm.py ./
-COPY --chown=claude:claude view_agents.sh ./
-COPY --chown=claude:claude configs/ ./configs/
-COPY --chown=claude:claude prompts/ ./prompts/
-COPY --chown=claude:claude best_practices_guides/ ./best_practices_guides/
-COPY --chown=claude:claude tool_setup_scripts/ ./tool_setup_scripts/
-
-# Copy Firebase configuration files
-COPY --chown=claude:claude firebase.json ./
-COPY --chown=claude:claude .firebaserc ./
-COPY --chown=claude:claude scripts/ ./scripts/
-COPY --chown=claude:claude seed-data/ ./seed-data/
-
-# Switch to non-root user
+# Switch to claude user
 USER claude
+WORKDIR /home/claude
 
-# Create virtual environment and install dependencies
-RUN python3 -m venv /home/claude/.venv && \
-    /home/claude/.venv/bin/pip install --upgrade pip && \
-    cd /app && \
-    /home/claude/.venv/bin/pip install -e .
+# Install Flutter
+ENV FLUTTER_VERSION=3.24.3
+ENV FLUTTER_HOME=/home/claude/flutter
+ENV PATH="$FLUTTER_HOME/bin:$PATH"
 
-# Set up shell environment for claude user
-RUN echo 'export PATH="/home/claude/.venv/bin:${PATH}"' >> /home/claude/.bashrc && \
-    echo 'export PATH="${FLUTTER_HOME}/bin:${PATH}"' >> /home/claude/.bashrc && \
-    echo 'export PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${PATH}"' >> /home/claude/.bashrc && \
-    echo 'export PATH="${ANDROID_HOME}/platform-tools:${PATH}"' >> /home/claude/.bashrc && \
-    echo 'export ANDROID_HOME="${ANDROID_HOME}"' >> /home/claude/.bashrc && \
-    echo 'alias cc="ENABLE_BACKGROUND_TASKS=1 claude --dangerously-skip-permissions"' >> /home/claude/.bashrc && \
-    echo '# cd to project directory is handled by entrypoint' >> /home/claude/.bashrc
+RUN git clone https://github.com/flutter/flutter.git -b stable $FLUTTER_HOME && \
+    flutter precache && \
+    flutter config --no-analytics && \
+    flutter doctor -v
 
-# Create workspace directory for mounting projects
-RUN mkdir -p /home/claude/workspace
+# Install Claude CLI (placeholder - replace with actual installation when available)
+# For now, we'll create a script that reminds to install Claude
+RUN echo '#!/bin/bash\necho "Please install Claude CLI manually or mount from host"\necho "Visit: https://claude.ai/cli for installation instructions"\nexit 1' > /home/claude/.local/bin/claude && \
+    chmod +x /home/claude/.local/bin/claude && \
+    mkdir -p /home/claude/.local/bin
 
-# Copy entrypoint script (as root to allow dynamic user switching)
-USER root
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Create claude-auto-resume wrapper
+RUN echo '#!/bin/bash\n# Claude auto-resume wrapper for usage limit handling\nif command -v claude >/dev/null 2>&1; then\n    claude "$@"\nelse\n    echo "Claude CLI not installed. Please install it first."\n    exit 1\nfi' > /home/claude/.local/bin/claude-auto-resume && \
+    chmod +x /home/claude/.local/bin/claude-auto-resume
 
-# Copy cc wrapper script to system bin
-COPY cc-wrapper.sh /usr/local/bin/cc
-RUN chmod +x /usr/local/bin/cc
+# Add .local/bin to PATH
+ENV PATH="/home/claude/.local/bin:$PATH"
 
-# Working directory will be set dynamically by entrypoint
+# Install Python dependencies for the agent
+COPY --chown=claude:claude requirements.txt /tmp/requirements.txt
+RUN python3 -m pip install --user -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
 
-# Environment variables that can be overridden
-ENV PROMPT_FILE=""
-ENV PROMPT_TEXT=""
-ENV CONFIG_FILE="/app/configs/flutter_config.json"
-ENV AGENTS="1"
-ENV AUTO_RESTART="true"
+# Copy the agent code
+COPY --chown=claude:claude . /home/claude/agent
 
-# Skip Claude permission prompts
-ENV CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
+# Install the agent
+WORKDIR /home/claude/agent
+RUN python3 -m pip install --user -e .
 
-# Expose ports for Flutter web and Firebase emulators
-EXPOSE 8080 4000 5000 5001 8085 9000 9099 9199 9299 4400
+# Create workspace directory for carenji
+RUN mkdir -p /workspace
+
+# Set up tmux configuration for better experience
+RUN echo 'set -g mouse on\nset -g history-limit 50000\nset -g status-bg colour235\nset -g status-fg colour136' > /home/claude/.tmux.conf
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Check if Claude CLI is available\n\
+if ! command -v claude >/dev/null 2>&1; then\n\
+    echo "⚠️  Claude CLI not found!"\n\
+    echo ""\n\
+    echo "Please install Claude CLI by:"\n\
+    echo "1. On the host: npm install -g @anthropic-ai/claude-cli"\n\
+    echo "2. Or mount it from host using Docker volumes"\n\
+    echo ""\n\
+    echo "For now, starting a bash shell..."\n\
+    exec /bin/bash\n\
+fi\n\
+\n\
+# Check if carenji project is mounted\n\
+if [ ! -f "/workspace/pubspec.yaml" ]; then\n\
+    echo "⚠️  Carenji project not found in /workspace!"\n\
+    echo ""\n\
+    echo "Please mount the carenji project:"\n\
+    echo "docker run -v /path/to/carenji:/workspace ..."\n\
+    echo ""\n\
+fi\n\
+\n\
+# Start the Flutter Firebase Agent\n\
+echo "🦋 Starting Claude Flutter Firebase Agent for Carenji Development"\n\
+echo ""\n\
+\n\
+# Set environment variables\n\
+export CLAUDE_PROJECT_PATH=/workspace\n\
+export CLAUDE_SINGLE_AGENT_DOCKER=1\n\
+export CLAUDE_FLUTTER_AGENT_DOCKER=1\n\
+\n\
+# Run the agent\n\
+exec claude-flutter-agent run "$@"\n\
+' > /home/claude/entrypoint.sh && \
+    chmod +x /home/claude/entrypoint.sh
+
+# Expose ports for Flutter development
+# Flutter DevTools
+EXPOSE 9100
+# Flutter Observatory
+EXPOSE 8181
+# Flutter VM Service
+EXPOSE 8182
+# Firebase Emulator Suite
+EXPOSE 4000 5000 5001 8080 8085 9000 9099 9199
+
+# Set working directory
+WORKDIR /workspace
 
 # Set entrypoint
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/home/claude/entrypoint.sh"]
 
-# Default command
-CMD ["--help"]
+# Labels
+LABEL maintainer="Claude Flutter Firebase Agent"
+LABEL description="AI-powered Flutter development environment for carenji healthcare app"
+LABEL version="1.0.0"

@@ -60,16 +60,43 @@ dmypy.json
 *.bak
 *.backup
 
-# Claude Agent Farm state files
-.claude_agent_farm_state.json
-.claude_agent_farm_state.tmp
-.ruff_cache/
-# Claude Agent Farm
-.heartbeats/
-.claude_agent_farm_backups/
-agent_farm_report_*.html
+# Claude Flutter Firebase Agent
+.env
+.env.local
+*.log
+logs/
 
-# Claude configuration (copied during Docker build)
+# Agent state and data
+.claude_flutter_agent_state.json
+.claude_flutter_agent_state.tmp
+agent_data/
+.heartbeats/
+
+# Claude configuration (should not be committed)
 claude.json
 .claude/
 prompt.txt
+prompts/*.txt
+
+# Docker volumes
+flutter-pub-cache/
+firebase-emulator-data/
+
+# Test coverage
+coverage/
+*.lcov
+
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+pubspec.lock
+
+# Firebase
+firebase-debug.log
+.firebase/
+.firebaserc
+
+# IDE
+.vscode/
+.idea/

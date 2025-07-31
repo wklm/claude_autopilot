@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  claude-single-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.single
+    image: claude-single-agent:latest
+    container_name: claude-single-agent-monitor
+    
+    environment:
+      # Project configuration
+      - PROJECT_PATH=/workspace
+      - PROMPT_FILE=${PROMPT_FILE:-}
+      - PROMPT_TEXT=${PROMPT_TEXT:-}
+      
+      # Behavior configuration
+      - WAIT_ON_LIMIT=${WAIT_ON_LIMIT:-true}
+      - RESTART_ON_COMPLETE=${RESTART_ON_COMPLETE:-true}
+      - RESTART_ON_ERROR=${RESTART_ON_ERROR:-true}
+      
+      # Monitoring configuration
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-5}
+      - IDLE_TIMEOUT=${IDLE_TIMEOUT:-300}
+      
+      # tmux configuration
+      - TMUX_SESSION=${TMUX_SESSION:-claude-agent}
+      
+      # Claude configuration
+      - CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
+      - CLAUDE_SINGLE_AGENT_DOCKER=1
+      
+    volumes:
+      # Project workspace (required)
+      - ${PROJECT_DIR:-.}:/workspace
+      
+      # Claude configuration (required - choose one)
+      # Modern config location
+      - ${HOME}/.config/claude:/home/claude/.config/claude:ro
+      # Legacy config location (if using older Claude)
+      # - ${HOME}/.claude.json:/home/claude/.claude.json:ro
+      # - ${HOME}/.claude:/home/claude/.claude:ro
+      
+      # Optional: Mount prompt file from host
+      # - ./my-prompt.txt:/prompt.txt:ro
+      
+    working_dir: /workspace
+    
+    # Keep container running
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "tmux", "has-session", "-t", "claude-agent"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# Example usage:
+# 
+# 1. With prompt file in project:
+#    PROJECT_DIR=/path/to/project docker-compose -f docker-compose-single.yml up
+#
+# 2. With prompt text:
+#    PROJECT_DIR=/path/to/project PROMPT_TEXT="Fix all type errors" docker-compose -f docker-compose-single.yml up
+#
+# 3. With external prompt file:
+#    PROJECT_DIR=/path/to/project PROMPT_FILE=/prompt.txt docker-compose -f docker-compose-single.yml up
+#
+# 4. To attach to the tmux session:
+#    docker exec -it claude-single-agent-monitor tmux attach-session -t claude-agent
+#
+# 5. To view logs:
+#    docker-compose -f docker-compose-single.yml logs -f
+#
+# 6. To stop:
+#    docker-compose -f docker-compose-single.yml down

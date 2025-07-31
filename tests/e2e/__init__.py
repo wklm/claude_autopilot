@@ -1,0 +1,1 @@
+"""End-to-end tests for Claude Flutter Firebase Agent."""

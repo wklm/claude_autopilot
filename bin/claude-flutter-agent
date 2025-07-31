@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Claude Flutter Agent - Direct executable wrapper."""
+
+import sys
+import os
+
+# Add the package to Python path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
+
+# Import and run the CLI
+from claude_code_agent_farm.flutter_agent_cli import app
+
+if __name__ == "__main__":
+    app()
