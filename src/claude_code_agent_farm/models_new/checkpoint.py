@@ -42,7 +42,7 @@ class CheckpointData(BaseModel):
     watchdog_state: dict[str, Any] | None = None
 
     # Additional context
-    events_summary: dict[str, int] = Field(default_factory=dict)
+    events_summary: dict[str, Any] = Field(default_factory=dict)
     last_pane_content: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
