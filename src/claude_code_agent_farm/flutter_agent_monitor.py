@@ -132,7 +132,8 @@ class FlutterAgentMonitor:
     def start_claude_agent(self) -> None:
         """Start Claude in the tmux session."""
         # Change to project directory
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent 'cd {self.settings.project_path}' Enter", check=True)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent 'cd {self.settings.project_path}'", check=True)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-m", check=True)
 
         # Start Claude with auto-resume if available
         claude_cmd = "claude-auto-resume" if self._has_auto_resume() else "claude"
@@ -140,7 +141,8 @@ class FlutterAgentMonitor:
         # Add flags
         claude_cmd += " --dangerously-skip-permissions"
 
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{claude_cmd}' Enter", check=True)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{claude_cmd}'", check=True)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-m", check=True)
 
         console.print("[green]✓ Started Claude agent[/green]")
 
@@ -158,7 +160,14 @@ class FlutterAgentMonitor:
         # Append ultrathink to enable thinking mode
         enhanced_prompt = f"{escaped_prompt} ultrathink"
 
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{enhanced_prompt}' Enter", check=True)
+        # Send the text
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{enhanced_prompt}'", check=True)
+        
+        # Small delay before Enter (like reference implementation)
+        time.sleep(0.2)
+        
+        # Send Enter using C-m (carriage return)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-m", check=True)
 
         console.print("[green]✓ Sent prompt to Claude[/green]")
         self.session.total_runs += 1
