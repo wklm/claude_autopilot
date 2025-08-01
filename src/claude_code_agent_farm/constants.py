@@ -49,29 +49,28 @@ CLAUDE_ERROR_INDICATORS = [
 ]
 
 CLAUDE_WORKING_INDICATORS = [
+    "✻ Pontificating",
+    "● Bash(",
+    "✻ Running",
+    "✻ Thinking",
+    "esc to interrupt",
+    # Legacy indicators (keep for compatibility)
     "thinking...",
     "analyzing...",
     "processing...",
-    "searching...",
-    "reading file",
-    "writing file",
-    "running command",
-    "executing",
-    "building",
-    "compiling",
-    "testing",
-    "generating",
 ]
 
 CLAUDE_READY_INDICATORS = [
-    ">>",  # Claude's prompt indicator
-    "ready",
-    "what would you like",
-    "how can i help",
-    "i'm ready",
-    "task completed",
-    "done",
-    "finished",
+    "│ >",  # Claude Code's prompt box indicator
+    "╰─",   # Prompt box bottom border (correct character)
+    # Combination patterns will be checked in code
+]
+
+# Additional patterns for ready state detection
+CLAUDE_WELCOME_INDICATORS = [
+    "Welcome to Claude Code!",
+    "? for shortcuts",
+    "Bypassing Permissions",
 ]
 
 # Flutter-specific indicators

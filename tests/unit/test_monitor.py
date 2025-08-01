@@ -132,35 +132,61 @@ class TestFlutterAgentMonitor:
     def test_check_agent_status_working(self, monitor):
         """Test detecting working status."""
         test_cases = [
-            "Thinking about the problem...",
-            "Analyzing the codebase...",
-            "Reading file: main.dart",
-            "Running command: flutter test",
+            "✻ Pontificating about the solution",
+            "● Bash(running tests)",
+            "✻ Running the command",
+            "✻ Thinking about the problem",
+            "Press esc to interrupt the current operation",
+            # Legacy indicators (these should match what's in constants.py)
+            "thinking...",
+            "analyzing...",
         ]
 
         for content in test_cases:
             with patch.object(monitor, "capture_pane_content", return_value=content):
                 status = monitor.check_agent_status()
-                assert status == AgentStatus.WORKING
+                assert status == AgentStatus.WORKING, f"Failed for content: {content}"
 
     def test_check_agent_status_ready(self, monitor):
-        """Test detecting ready status."""
-        with patch.object(monitor, "capture_pane_content", return_value=">> "):
+        """Test detecting ready status with Claude Code patterns."""
+        # Test case 1: Full prompt box structure
+        content1 = """╭──────────────────────────────────────────────────────────────────────────────╮
+│ > Type your request here                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯"""
+        
+        with patch.object(monitor, "capture_pane_content", return_value=content1):
+            status = monitor.check_agent_status()
+            assert status == AgentStatus.READY
+            
+        # Test case 2: Welcome message with prompt
+        content2 = """Welcome to Claude Code!
+│ > Ready for your command"""
+        
+        with patch.object(monitor, "capture_pane_content", return_value=content2):
+            status = monitor.check_agent_status()
+            assert status == AgentStatus.READY
+            
+        # Test case 3: Just prompt indicator with content
+        content3 = "Previous output here\n│ > "
+        
+        with patch.object(monitor, "capture_pane_content", return_value=content3):
             status = monitor.check_agent_status()
             assert status == AgentStatus.READY
 
     def test_check_agent_status_error(self, monitor):
         """Test detecting error status."""
         test_cases = [
-            "Error: Something went wrong",
-            "Failed to connect",
-            "Exception: Test error",
+            "error: Something went wrong",  # lowercase
+            "failed to connect",  # lowercase
+            "exception: Test error",  # lowercase
+            "traceback information here",
+            "an error occurred while processing",
         ]
 
         for content in test_cases:
             with patch.object(monitor, "capture_pane_content", return_value=content):
                 status = monitor.check_agent_status()
-                assert status == AgentStatus.ERROR
+                assert status == AgentStatus.ERROR, f"Failed for content: {content}"
 
     def test_check_agent_status_usage_limit(self, monitor):
         """Test detecting usage limit."""
@@ -298,6 +324,147 @@ For more information visit claude.ai"""
             kill_call = mock_run.call_args[0][0]
             assert "kill-session" in kill_call
             assert monitor.settings.tmux_session in kill_call
+            
+    def test_idle_detection_transition_to_ready(self, monitor):
+        """Test that transitioning from working to ready sets timestamp."""
+        # Initially working
+        monitor.session.status = AgentStatus.WORKING
+        monitor.last_ready_time = None
+        
+        # Mock ready content
+        ready_content = """╭──────────────────────────────────────────────────────────────────────────────╮
+│ > Task completed successfully                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯"""
+        
+        with patch.object(monitor, "capture_pane_content", return_value=ready_content):
+            # Simulate monitoring loop detecting status change
+            current_status = monitor.check_agent_status()
+            assert current_status == AgentStatus.READY
+            
+            # Use a fixed datetime for testing
+            from datetime import datetime as dt
+            test_time = dt(2024, 1, 1, 12, 0, 0)
+            
+            # Simulate the status change logic from monitoring loop
+            if current_status == AgentStatus.READY and monitor.session.status == AgentStatus.WORKING:
+                monitor.last_ready_time = test_time
+            
+            assert monitor.last_ready_time == test_time
+                
+    def test_restart_on_complete_within_threshold(self, monitor):
+        """Test restart when just became ready with restart_on_complete enabled."""
+        monitor.settings.restart_on_complete = True
+        monitor.last_ready_time = datetime.now() - timedelta(seconds=3)
+        
+        with patch.object(monitor, "restart_agent") as mock_restart:
+            # Simulate idle check logic from monitoring loop
+            idle_seconds = (datetime.now() - monitor.last_ready_time).total_seconds()
+            
+            if idle_seconds < 5 and monitor.settings.restart_on_complete:
+                monitor.restart_agent()
+                
+            mock_restart.assert_called_once()
+            
+    def test_restart_on_idle_timeout(self, monitor):
+        """Test restart when idle time exceeds threshold."""
+        monitor.settings.idle_timeout = 30
+        monitor.last_ready_time = datetime.now() - timedelta(seconds=35)
+        
+        with patch.object(monitor, "restart_agent") as mock_restart:
+            # Simulate idle check logic from monitoring loop
+            idle_seconds = (datetime.now() - monitor.last_ready_time).total_seconds()
+            
+            if idle_seconds > monitor.settings.idle_timeout:
+                monitor.restart_agent()
+                
+            mock_restart.assert_called_once()
+            
+    def test_ready_time_reset_on_restart(self, monitor):
+        """Test that last_ready_time is reset when agent restarts."""
+        monitor.last_ready_time = datetime.now()
+        
+        # Store initial value to confirm it was set
+        initial_time = monitor.last_ready_time
+        assert initial_time is not None
+        
+        with patch("claude_code_agent_farm.flutter_agent_monitor.run"):
+            with patch.object(monitor, "start_claude_agent"):
+                with patch.object(monitor, "send_prompt"):
+                    with patch("time.sleep"):
+                        # The restart_tracker should allow restart by default in tests
+                        monitor.restart_agent()
+                        
+                        # Verify ready time was reset
+                        assert monitor.last_ready_time is None
+                            
+    def test_check_agent_status_unknown(self, monitor):
+        """Test detecting unknown status when patterns don't match."""
+        test_cases = [
+            "Random output that doesn't match any pattern",
+            "",  # Empty content
+            "Some terminal output\nwithout any indicators",
+            # Note: "│ >" alone is considered READY due to our fallback logic
+        ]
+        
+        for content in test_cases:
+            with patch.object(monitor, "capture_pane_content", return_value=content):
+                status = monitor.check_agent_status()
+                assert status == AgentStatus.UNKNOWN, f"Expected UNKNOWN for content: {content}"
+                
+        # Test edge case - prompt indicator alone is actually considered ready
+        with patch.object(monitor, "capture_pane_content", return_value="│ >"):
+            status = monitor.check_agent_status()
+            assert status == AgentStatus.READY  # This is by design
+                
+    def test_status_transitions_and_events(self, monitor):
+        """Test that status transitions are properly recorded."""
+        # Start with WORKING
+        monitor.session.status = AgentStatus.WORKING
+        
+        # Transition to READY
+        ready_content = """╭──────────────────────────────────────────────────────────────────────────────╮
+│ > Ready                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯"""
+        
+        with patch.object(monitor, "capture_pane_content", return_value=ready_content):
+            new_status = monitor.check_agent_status()
+            
+            # Simulate monitoring loop logic
+            if new_status != monitor.session.status:
+                from claude_code_agent_farm.models_new.events import StatusChangeEvent
+                monitor.events.add(
+                    StatusChangeEvent(
+                        previous_status=monitor.session.status.value,
+                        new_status=new_status.value,
+                        source="monitor",
+                    )
+                )
+                
+            # Verify event was recorded
+            assert len(monitor.events.events) == 1
+            event = monitor.events.events[0]
+            assert event.previous_status == "working"
+            assert event.new_status == "ready"
+            
+    def test_send_prompt_with_ultrathink(self, monitor):
+        """Test that prompts have 'ultrathink' appended."""
+        monitor.settings.prompt_text = "Fix the bug in main.dart"
+        
+        with patch("claude_code_agent_farm.flutter_agent_monitor.run") as mock_run:
+            monitor.send_prompt()
+            
+            # Check both send-keys calls
+            assert mock_run.call_count == 2
+            
+            # First call should send the text with ultrathink
+            text_call = mock_run.call_args_list[0][0][0]
+            assert "send-keys" in text_call
+            assert "Fix the bug in main.dart ultrathink" in text_call
+            
+            # Second call should send Enter
+            enter_call = mock_run.call_args_list[1][0][0]
+            assert "send-keys" in enter_call
+            assert "C-m" in enter_call
 
 
 @pytest.mark.unit

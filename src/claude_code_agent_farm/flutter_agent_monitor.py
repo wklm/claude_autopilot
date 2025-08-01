@@ -76,6 +76,9 @@ class FlutterAgentMonitor:
         self.events = EventStore()
         self.command_history = CommandHistory()
         self.last_command_execution = None
+        
+        # Track last time agent transitioned to ready
+        self.last_ready_time = None
 
         # Retry strategy for usage limits
         self.retry_strategy = RetryStrategy(
@@ -210,18 +213,33 @@ class FlutterAgentMonitor:
             if indicator in content:
                 return AgentStatus.ERROR
 
-        # Check if working
+        # Check if working (highest priority after errors)
         for indicator in constants.CLAUDE_WORKING_INDICATORS:
             if indicator in content:
                 self.watchdog.feed(ActivityType.TASK_PROGRESS, f"Agent working: {indicator}")
                 return AgentStatus.WORKING
 
-        # Check if ready/idle
-        for indicator in constants.CLAUDE_READY_INDICATORS:
-            if indicator in content:
-                # Check if actually idle (no activity for idle_timeout)
-                # This is simplified - in production you'd track last activity
-                return AgentStatus.READY
+        # Check if ready - Claude Code shows prompt box when ready
+        # Look for multiple indicators to be sure
+        has_prompt_box = "│ >" in content
+        has_box_border = "╰─" in content
+        has_welcome = any(indicator in content for indicator in constants.CLAUDE_WELCOME_INDICATORS)
+        
+        # Ready if we see the prompt box structure
+        if has_prompt_box and has_box_border:
+            return AgentStatus.READY
+        
+        # Also ready if we see welcome message with prompt
+        if has_welcome and has_prompt_box:
+            return AgentStatus.READY
+        
+        # Sometimes just the prompt indicator is enough
+        if has_prompt_box and len(content.strip()) > 0:
+            # Verify it's not a false positive by checking context
+            lines = content.split('\n')
+            for line in lines:
+                if "│ >" in line and not any(working in line for working in constants.CLAUDE_WORKING_INDICATORS):
+                    return AgentStatus.READY
 
         return AgentStatus.UNKNOWN
 
@@ -284,6 +302,9 @@ class FlutterAgentMonitor:
             return
 
         console.print("[cyan]Restarting Claude agent...[/cyan]")
+        
+        # Reset ready time tracking
+        self.last_ready_time = None
 
         # Create health check for this restart
         restart_health = RestartHealthCheck()
@@ -645,6 +666,11 @@ class FlutterAgentMonitor:
                                 source="monitor",
                             ),
                         )
+                        
+                        # Track when agent becomes ready (task completed)
+                        if current_status == AgentStatus.READY and last_status == AgentStatus.WORKING:
+                            self.last_ready_time = datetime.now()
+                            console.print("[dim]Agent task completed, now ready[/dim]")
 
                         # Handle different statuses
                         if current_status == AgentStatus.ERROR:
@@ -652,19 +678,24 @@ class FlutterAgentMonitor:
                                 console.print("[yellow]Error detected, restarting agent...[/yellow]")
                                 self.restart_agent()
 
-                        elif current_status == AgentStatus.IDLE:
-                            if self.settings.restart_on_complete:
-                                console.print("[yellow]Agent idle, assuming task complete. Restarting...[/yellow]")
-                                self.restart_agent()
-
-                        elif current_status == AgentStatus.READY:
-                            if self.settings.restart_on_complete:
-                                console.print("[yellow]Agent ready, task complete. Restarting...[/yellow]")
-                                self.restart_agent()
-
                         elif current_status == AgentStatus.USAGE_LIMIT and not self.settings.wait_on_limit:
                             console.print("[yellow]Usage limit hit but waiting disabled. Stopping.[/yellow]")
                             self.running = False
+                    
+                    # Check for idle timeout when agent is READY
+                    if current_status == AgentStatus.READY and self.last_ready_time:
+                        idle_seconds = (datetime.now() - self.last_ready_time).total_seconds()
+                        
+                        # If just became ready (< 5 seconds), restart if restart_on_complete is true
+                        if idle_seconds < 5 and self.settings.restart_on_complete:
+                            console.print("[yellow]Agent ready, task complete. Restarting...[/yellow]")
+                            self.restart_agent()
+                            self.last_ready_time = None  # Reset
+                        # If idle for too long, always restart
+                        elif idle_seconds > self.settings.idle_timeout:
+                            console.print(f"[yellow]Agent idle for {int(idle_seconds)}s (>{self.settings.idle_timeout}s). Restarting...[/yellow]")
+                            self.restart_agent()
+                            self.last_ready_time = None  # Reset
 
                     last_status = current_status
 
