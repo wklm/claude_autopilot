@@ -13,13 +13,14 @@ Claude Flutter Agent is an intelligent monitoring system that manages Claude CLI
 
 ### Key Features
 
+- 🚀 **Ultra-Simple CLI**: Just `cfa "your prompt"` - no flags needed!
 - 🔄 **Automatic Recovery**: Restarts Claude on errors, completion, or usage limits
 - ⏰ **Smart Usage Limit Handling**: Detects and waits for rate limits with intelligent retry
 - 🦋 **Flutter Integration**: Built for Flutter development with MCP support
 - 🔥 **Firebase Support**: Integrated Firebase emulator management
 - 💾 **Session Persistence**: Saves and restores session state across restarts
 - 📊 **Real-time Monitoring**: Live status updates and health checks
-- 🎯 **Flexible Configuration**: Environment variables, config files, and CLI options
+- 🎯 **Smart Defaults**: Pre-configured with sensible settings that just work
 - 🚀 **Easy Setup**: Simple bash aliases for common tasks
 
 ### Advanced Features
@@ -54,19 +55,22 @@ cd claude_code_agent_farm
 source ~/.bashrc  # or ~/.zshrc
 ```
 
-### 2. Basic Usage
+### 2. Basic Usage - Now Even Simpler! 🎉
 
 ```bash
-# Run with a prompt
-cfa --prompt-text "Implement user authentication"
+# Just pass your prompt directly - no flags needed!
+cfa "Implement user authentication"
 
-# Run with a prompt file  
-cfa --prompt-file ./prompts/feature.md
+# Run with a prompt file using @ syntax
+cfa @prompts/feature.md
 
-# Quick commands
+# Quick commands (pre-configured tasks)
 cfa-fix      # Fix Flutter analyzer errors
 cfa-test     # Write tests for recent changes
 cfa-review   # Review code for best practices
+
+# Still supports options if needed
+cfa "Complex task" --project-path /path/to/project
 ```
 
 ### 3. Advanced Installation
@@ -122,10 +126,10 @@ CLAUDE_MCP_ENABLED=true
 CLAUDE_MCP_VMSERVICE_PORT=8182
 CLAUDE_MCP_DDS_PORT=8181
 
-# Agent behavior
-CLAUDE_WAIT_ON_LIMIT=true
-CLAUDE_RESTART_ON_COMPLETE=true
-CLAUDE_CHECK_INTERVAL=5
+# Agent behavior (smart defaults already set!)
+CLAUDE_WAIT_ON_LIMIT=true        # default
+CLAUDE_RESTART_ON_COMPLETE=true  # default  
+CLAUDE_CHECK_INTERVAL=5          # default
 ```
 
 ### Configuration File (.env)
@@ -177,36 +181,36 @@ MCP tools available:
 
 ## 📝 Common Tasks
 
-### Using Aliases
+### Using the New Simple Syntax
 ```bash
-# Quick fixes
+# Quick fixes with aliases
 cfa-fix                    # Fix analyzer errors
 cfa-test                   # Write tests
 cfa-review                 # Code review
 
-# Custom prompts
-cfa --prompt-text "Your task here"
-cfa --prompt-file feature.md
+# Custom prompts - just type what you need!
+cfa "Your task here"
+cfa @feature.md            # Read from file
 ```
 
 ### Fix Analyzer Errors
 ```bash
-claude-flutter-agent run -p "Fix all Flutter analyzer errors following carenji standards"
+cfa "Fix all Flutter analyzer errors following carenji standards"
 ```
 
 ### Implement New Feature
 ```bash
-claude-flutter-agent run -p "Implement medication reminder notifications with tests"
+cfa "Implement medication reminder notifications with tests"
 ```
 
 ### Improve Test Coverage
 ```bash
-claude-flutter-agent run -p "Add tests to achieve 90% coverage for medication management"
+cfa "Add tests to achieve 90% coverage for medication management"
 ```
 
 ### Review and Refactor
 ```bash
-claude-flutter-agent run -p "Review vitals monitoring for performance optimization"
+cfa "Review vitals monitoring for performance optimization"
 ```
 
 ### Session Management
