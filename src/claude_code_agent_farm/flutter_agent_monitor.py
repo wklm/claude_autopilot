@@ -132,10 +132,7 @@ class FlutterAgentMonitor:
     def start_claude_agent(self) -> None:
         """Start Claude in the tmux session."""
         # Change to project directory
-        subprocess.run([
-            "tmux", "send-keys", "-t", f"{self.settings.tmux_session}:agent",
-            f"cd {self.settings.project_path}", "Enter"
-        ], check=True)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent 'cd {self.settings.project_path}' Enter", check=True)
 
         # Start Claude with auto-resume if available
         claude_cmd = "claude-auto-resume" if self._has_auto_resume() else "claude"
@@ -143,10 +140,7 @@ class FlutterAgentMonitor:
         # Add flags
         claude_cmd += " --dangerously-skip-permissions"
 
-        subprocess.run([
-            "tmux", "send-keys", "-t", f"{self.settings.tmux_session}:agent",
-            claude_cmd, "Enter"
-        ], check=True)
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{claude_cmd}' Enter", check=True)
 
         console.print("[green]✓ Started Claude agent[/green]")
 
@@ -158,15 +152,13 @@ class FlutterAgentMonitor:
 
     def send_prompt(self) -> None:
         """Send the prompt to Claude."""
-        # Use subprocess directly to avoid shell parsing issues with special characters
-        try:
-            subprocess.run([
-                "tmux", "send-keys", "-t", f"{self.settings.tmux_session}:agent",
-                self.settings.prompt_text, "Enter"
-            ], check=True)
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]Failed to send prompt to Claude: {e}[/red]")
-            raise
+        # Escape special characters in prompt
+        escaped_prompt = self.settings.prompt_text.replace("'", "'\"'\"'")
+        
+        # Append ultrathink to enable thinking mode
+        enhanced_prompt = f"{escaped_prompt} ultrathink"
+
+        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{enhanced_prompt}' Enter", check=True)
 
         console.print("[green]✓ Sent prompt to Claude[/green]")
         self.session.total_runs += 1
@@ -298,9 +290,7 @@ class FlutterAgentMonitor:
 
         try:
             # Send Ctrl+C to stop current session
-            subprocess.run([
-                "tmux", "send-keys", "-t", f"{self.settings.tmux_session}:agent", "C-c"
-            ], check=True)
+            run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-c", check=True)
 
             time.sleep(2)
 
