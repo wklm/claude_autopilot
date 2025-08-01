@@ -1,17 +1,14 @@
 """Shared pytest fixtures and configuration for Claude Flutter Firebase Agent tests."""
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator
 from unittest.mock import Mock, patch
 
 import pytest
-from pydantic import BaseModel
 
 from claude_code_agent_farm.flutter_agent_settings import FlutterAgentSettings
-from claude_code_agent_farm.flutter_agent_monitor import FlutterAgentMonitor
 
 
 # Test environment setup
@@ -19,13 +16,13 @@ from claude_code_agent_farm.flutter_agent_monitor import FlutterAgentMonitor
 def test_environment():
     """Set up test environment variables."""
     original_env = os.environ.copy()
-    
+
     # Set test-specific environment variables
     os.environ["CLAUDE_FLUTTER_AGENT_TESTING"] = "1"
     os.environ["CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"] = "1"
-    
+
     yield
-    
+
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)
@@ -43,7 +40,7 @@ def mock_carenji_project(temp_dir: Path) -> Path:
     """Create a mock Carenji project structure."""
     project_dir = temp_dir / "carenji"
     project_dir.mkdir()
-    
+
     # Create pubspec.yaml
     pubspec_content = """name: carenji
 description: "carenji app."
@@ -71,7 +68,7 @@ flutter:
   uses-material-design: true
 """
     (project_dir / "pubspec.yaml").write_text(pubspec_content)
-    
+
     # Create firebase.json
     firebase_content = """{
   "firestore": {
@@ -95,7 +92,7 @@ flutter:
   }
 }"""
     (project_dir / "firebase.json").write_text(firebase_content)
-    
+
     # Create CLAUDE.md
     claude_md_content = """# CLAUDE.md - AI Development Notes
 This file contains important notes for AI assistants working on Carenji.
@@ -110,17 +107,17 @@ Carenji is a comprehensive healthcare management system for nursing homes.
 - Family Portal
 """
     (project_dir / "CLAUDE.md").write_text(claude_md_content)
-    
+
     # Create lib directory structure
     lib_dir = project_dir / "lib"
     lib_dir.mkdir()
     (lib_dir / "main.dart").write_text("void main() {}")
-    
+
     # Create test directory
     test_dir = project_dir / "test"
     test_dir.mkdir()
     (test_dir / "widget_test.dart").write_text("// Widget tests")
-    
+
     return project_dir
 
 
@@ -154,13 +151,13 @@ def mock_claude_cli():
 def mock_tmux():
     """Mock tmux commands."""
     with patch("subprocess.run") as mock_run:
-        
+
         def tmux_side_effect(cmd, **kwargs):
             result = Mock()
             result.returncode = 0
             result.stdout = ""
             result.stderr = ""
-            
+
             # Handle different tmux commands
             if isinstance(cmd, list) and len(cmd) > 1:
                 if cmd[1] == "capture-pane":
@@ -170,9 +167,9 @@ def mock_tmux():
             elif isinstance(cmd, str):
                 if "capture-pane" in cmd:
                     result.stdout = ">> Ready for input\n"
-                    
+
             return result
-            
+
         mock_run.side_effect = tmux_side_effect
         yield mock_run
 
@@ -181,21 +178,21 @@ def mock_tmux():
 def mock_docker():
     """Mock Docker commands."""
     with patch("subprocess.run") as mock_run:
-        
+
         def docker_side_effect(cmd, **kwargs):
             result = Mock()
             result.returncode = 0
             result.stdout = ""
             result.stderr = ""
-            
+
             if isinstance(cmd, list) and "docker" in cmd:
                 if "ps" in cmd:
                     result.stdout = "claude-carenji-agent"
                 elif "images" in cmd:
                     result.stdout = "claude-flutter-firebase-agent"
-                    
+
             return result
-            
+
         mock_run.side_effect = docker_side_effect
         yield mock_run
 
@@ -241,27 +238,11 @@ The carenji app is now ready for deployment.
 # Markers for different test types
 def pytest_configure(config):
     """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "unit: Unit tests (fast, no external dependencies)"
-    )
-    config.addinivalue_line(
-        "markers", "integration: Integration tests (may require Docker)"
-    )
-    config.addinivalue_line(
-        "markers", "e2e: End-to-end tests (slow, full system tests)"
-    )
-    config.addinivalue_line(
-        "markers", "docker: Tests requiring Docker"
-    )
-    config.addinivalue_line(
-        "markers", "slow: Slow running tests (>5s)"
-    )
-    config.addinivalue_line(
-        "markers", "carenji: Tests specific to Carenji app functionality"
-    )
-    config.addinivalue_line(
-        "markers", "firebase: Tests requiring Firebase emulators"
-    )
-    config.addinivalue_line(
-        "markers", "mcp: Tests for Flutter MCP integration"
-    )
+    config.addinivalue_line("markers", "unit: Unit tests (fast, no external dependencies)")
+    config.addinivalue_line("markers", "integration: Integration tests (may require Docker)")
+    config.addinivalue_line("markers", "e2e: End-to-end tests (slow, full system tests)")
+    config.addinivalue_line("markers", "docker: Tests requiring Docker")
+    config.addinivalue_line("markers", "slow: Slow running tests (>5s)")
+    config.addinivalue_line("markers", "carenji: Tests specific to Carenji app functionality")
+    config.addinivalue_line("markers", "firebase: Tests requiring Firebase emulators")
+    config.addinivalue_line("markers", "mcp: Tests for Flutter MCP integration")

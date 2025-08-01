@@ -1,6 +1,6 @@
-# Claude Flutter Firebase Agent 🦋🔥
+# Claude Flutter Agent 🤖🦋
 
-> AI-powered development assistant specifically tailored for the Carenji healthcare Flutter app with Firebase backend
+> An intelligent monitoring system for Claude CLI that manages Flutter development sessions with automatic restart, usage limit handling, and Firebase integration
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Flutter](https://img.shields.io/badge/Flutter-3.24+-02569B.svg)](https://flutter.dev)
@@ -9,97 +9,80 @@
 
 ## 🎯 What is this?
 
-Claude Flutter Firebase Agent is a specialized AI development assistant that monitors and manages Claude sessions for developing the Carenji healthcare app. It provides intelligent automation, Firebase emulator integration, Flutter MCP support, and automatic usage limit handling to maximize development productivity.
+Claude Flutter Agent is an intelligent monitoring system that manages Claude CLI sessions for Flutter development. It provides automatic error recovery, usage limit handling, Firebase integration, and session persistence to maximize development productivity.
 
 ### Key Features
 
-- 🦋 **Flutter-Specific**: Tailored for Flutter development with hot reload detection and MCP integration
-- 🔥 **Firebase Integration**: Built-in support for Firebase emulators and Firestore rules
-- 🏥 **Carenji-Focused**: Pre-configured for the Carenji healthcare app architecture
-- 🔄 **Auto-Resume**: Handles Claude usage limits intelligently with automatic retry
-- 📊 **Real-time Monitoring**: Live status dashboard with Flutter and Firebase metrics
-- 🧪 **Test Coverage**: Ensures 80% minimum test coverage following Carenji standards
-- 📱 **MCP Support**: Flutter Model Context Protocol for enhanced AI assistance
-- 🐳 **Docker Ready**: Complete containerized development environment
+- 🔄 **Automatic Recovery**: Restarts Claude on errors, completion, or usage limits
+- ⏰ **Smart Usage Limit Handling**: Detects and waits for rate limits with intelligent retry
+- 🦋 **Flutter Integration**: Built for Flutter development with MCP support
+- 🔥 **Firebase Support**: Integrated Firebase emulator management
+- 💾 **Session Persistence**: Saves and restores session state across restarts
+- 📊 **Real-time Monitoring**: Live status updates and health checks
+- 🎯 **Flexible Configuration**: Environment variables, config files, and CLI options
+- 🚀 **Easy Setup**: Simple bash aliases for common tasks
 
-### Enhanced Monitoring Features (v1.1.0)
+### Advanced Features
 
-- 🎯 **Advanced Usage Limit Detection**: 28 different patterns for detecting rate limits
-- 📈 **Exponential Backoff**: Smart retry timing with jitter (60s → 120s → 240s → ...)
-- 🏥 **Health Checks**: Pre/post restart validation ensures reliability
-- 🐕 **Watchdog Timer**: Automatically detects and recovers from hung agents
-- 💾 **Session Checkpoints**: Periodic state saves enable crash recovery
-- 🚦 **Restart Limits**: Prevents rapid cycling with cooldown periods
-- 🔍 **Stuck Pattern Detection**: Identifies when agent is stuck on repetitive tasks
+- 📈 **Exponential Backoff**: Smart retry strategy for usage limits
+- 🏥 **Health Monitoring**: Tracks session health and performance
+- 🐕 **Watchdog Timer**: Detects and recovers from hung sessions
+- 💾 **State Management**: Comprehensive session and event tracking
+- 🔍 **Pattern Detection**: Identifies usage limit messages intelligently
+- ⚡ **Fast Response**: Sub-second monitoring intervals available
+- 🛠️ **Extensible**: Clean architecture with Pydantic models
 
 ## 📋 Prerequisites
 
-### On Your Host Machine
-- **Docker** and **Docker Compose**
-- **Git** (for repository management)
-- **Claude CLI** (optional - can be mounted from host)
-
-### Provided in Docker Container
-- **Flutter SDK 3.24+**
-- **Firebase CLI**
-- **Python 3.9+**
-- **tmux** (for session management)
-- **All Carenji development dependencies**
+- **Python 3.10+** 
+- **Claude CLI** installed and configured
+- **tmux** for session management
+- **Flutter SDK** (for Flutter development)
+- **Firebase CLI** (optional, for Firebase features)
 
 ## 🚀 Quick Start
 
 ### 1. Clone and Setup
 
 ```bash
-# Clone the agent repository
-git clone https://github.com/yourusername/claude-flutter-firebase-agent.git
-cd claude-flutter-firebase-agent
+# Clone the repository
+git clone https://github.com/yourusername/claude_code_agent_farm.git
+cd claude_code_agent_farm
 
-# Set the path to your carenji project
-export CARENJI_PATH=/path/to/carenji
+# Run the setup script to install aliases
+./setup_aliases.sh
+source ~/.bashrc  # or ~/.zshrc
 ```
 
-### 2. Simple Installation (No Dependencies)
+### 2. Basic Usage
 
 ```bash
-# Add alias to your shell configuration
-echo "alias claude-flutter-agent='/home/wojtek/dev/claude_code_agent_farm/bin/claude-flutter-agent-simple'" >> ~/.bashrc
-source ~/.bashrc
+# Run with a prompt
+cfa --prompt-text "Implement user authentication"
 
-# Now you can use from anywhere
-claude-flutter-agent run -p "Fix all Flutter analyzer errors"
+# Run with a prompt file  
+cfa --prompt-file ./prompts/feature.md
+
+# Quick commands
+cfa-fix      # Fix Flutter analyzer errors
+cfa-test     # Write tests for recent changes
+cfa-review   # Review code for best practices
 ```
 
-### 3. Run with Docker Compose
+### 3. Advanced Installation
 
 ```bash
-# Start the agent
-docker-compose up -d
+# For full Python version with all features
+cd bin
+./claude-flutter-agent-python --help
 
-# View agent output
-docker-compose logs -f claude-carenji-agent
-
-# Attach to the tmux session
-docker exec -it claude-carenji-agent tmux attach-session -t claude-carenji
+# The Python launcher will automatically:
+# - Create a virtual environment
+# - Install all dependencies
+# - Run the agent with your configuration
 ```
 
-### 4. Run Locally with Full Features
-
-```bash
-# Install dependencies
-pip install typer rich pydantic pydantic-settings
-
-# Install the agent
-pip install -e .
-
-# Run with a specific prompt
-claude-flutter-agent run --prompt-text "Fix all Flutter analyzer errors in carenji"
-
-# Or use a prompt file
-claude-flutter-agent run --prompt-file prompts/implement_feature.txt
-```
-
-## 🏥 Carenji-Specific Features
+## 🏥 Carenji Project Support
 
 ### Pre-configured for Carenji Architecture
 - Clean architecture with domain/data/presentation layers
@@ -162,21 +145,11 @@ CLAUDE_CARENJI_FEATURES_ENABLED=medication_management,vitals_monitoring,staff_sc
 
 ## 🔥 Firebase Emulator Integration
 
-### Using Docker Compose Emulators
+### Automatic detection and startup
 
-```bash
-# Start with Firebase emulators
-docker-compose --profile with-emulators up -d
+The agent automatically detects Firebase configuration and starts emulators if needed.
 
-# Emulator ports:
-# - 4000: Emulator UI
-# - 8079: Firestore  
-# - 9098: Auth
-# - 5001: Functions
-# - 9199: Storage
-```
-
-### Using Carenji's Emulators
+### Using Project Emulators
 
 ```bash
 # In the carenji directory
@@ -204,16 +177,16 @@ MCP tools available:
 
 ## 📝 Common Tasks
 
-### Quick Command Usage
+### Using Aliases
 ```bash
-# Simple one-liner from anywhere
-claude-flutter-agent "Fix all Flutter analyzer errors"
+# Quick fixes
+cfa-fix                    # Fix analyzer errors
+cfa-test                   # Write tests
+cfa-review                 # Code review
 
-# With explicit prompt flag
-claude-flutter-agent run -p "Implement medication reminder notifications"
-
-# Using a prompt file
-claude-flutter-agent run -f /path/to/prompt.txt
+# Custom prompts
+cfa --prompt-text "Your task here"
+cfa --prompt-file feature.md
 ```
 
 ### Fix Analyzer Errors
@@ -236,78 +209,71 @@ claude-flutter-agent run -p "Add tests to achieve 90% coverage for medication ma
 claude-flutter-agent run -p "Review vitals monitoring for performance optimization"
 ```
 
-### Monitor Agent Status
+### Session Management
 ```bash
-# Check if agent is running
-claude-flutter-agent status
-
-# Attach to see Claude working
-claude-flutter-agent attach
+# Attach to running session
+cfa-attach
 
 # Stop the agent
-claude-flutter-agent stop
+cfa-stop
+
+# Show configuration
+cfa-config
 ```
 
-## 🛠️ Development Scripts
+## 🛠️ Development
 
-### Start Development Environment
+### Running Tests
 ```bash
-./scripts/start-carenji-dev.sh
+# Install test dependencies
+pip install -e ".[test]"
+
+# Run tests
+pytest
+
+# With coverage
+pytest --cov=claude_code_agent_farm
 ```
 
-### Run All Tests
+### Code Quality
 ```bash
-./scripts/run-carenji-tests.sh
+# Linting
+ruff check src/
+
+# Type checking  
+mypy src/
 ```
 
-### Check Coverage
-```bash
-./scripts/check-coverage.sh
+## 📊 Architecture
+
+### Clean Module Structure
 ```
-
-## 📊 Monitoring
-
-### View Agent Status
-```bash
-# Attach to tmux session
-docker exec -it claude-carenji-agent tmux attach-session -t claude-carenji
-
-# View logs
-docker-compose logs -f claude-carenji-agent
+src/claude_code_agent_farm/
+├── models_new/          # Pydantic models
+│   ├── session.py      # Session state management
+│   ├── events.py       # Event tracking system
+│   └── commands.py     # Command execution models
+├── utils/              # Utilities
+│   ├── shell.py        # Safe subprocess execution
+│   ├── flutter_helpers.py  # Flutter/Firebase helpers
+│   └── time_parser.py  # Usage limit parsing
+├── flutter_agent_monitor.py  # Main monitoring logic
+├── flutter_agent_settings.py # Configuration
+└── flutter_agent_cli.py      # CLI interface
 ```
-
-### Status Dashboard Shows
-- Current Claude status (working/idle/usage_limit)
-- Total runs and restarts
-- Usage limit tracking with retry times
-- Firebase emulator health
-- Flutter compilation status
 
 ## 🚨 Troubleshooting
 
-### Claude Not Found
+### Common Issues
+
+1. **tmux not found**: Install with `sudo apt install tmux`
+2. **Import errors**: Dependencies are auto-installed by the Python launcher
+3. **Claude CLI not found**: Ensure Claude CLI is in your PATH
+4. **Firebase issues**: Check emulator ports in configuration
+
+### Debug Mode
 ```bash
-# Install Claude CLI on host
-npm install -g @anthropic-ai/claude-cli
-
-# Or mount from host in docker-compose.yml
-volumes:
-  - /usr/local/bin/claude:/usr/local/bin/claude:ro
-```
-
-### Firebase Emulators Not Starting
-```bash
-# Check ports are available
-lsof -i :8079,9098,5001,4001
-
-# Use alternative ports in docker-compose.yml
-```
-
-### Flutter MCP Not Connecting
-```bash
-# Ensure Flutter is running with correct flags
-# Check VM service is accessible
-curl http://localhost:8182
+CLAUDE_LOG_LEVEL=DEBUG cfa --prompt-text "Debug this"
 ```
 
 ## 🤝 Contributing
@@ -332,4 +298,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Note**: This agent is specifically designed for Carenji development. For general Flutter projects, you may need to adjust the configuration.
+**Note**: This agent includes special support for the Carenji healthcare app but works with any Flutter project.

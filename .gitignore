@@ -28,6 +28,7 @@ venv/
 ENV/
 env/
 .direnv/
+.test_venv/
 
 # uv
 uv.lock
@@ -85,6 +86,7 @@ firebase-emulator-data/
 # Test coverage
 coverage/
 *.lcov
+ruff-report.json
 
 # Flutter/Dart
 .dart_tool/

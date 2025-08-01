@@ -1,31 +1,28 @@
 """End-to-end tests for Firebase integration."""
 
 import json
-import os
 import subprocess
-import time
-from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from claude_code_agent_farm.flutter_agent_monitor import FlutterAgentMonitor
 from claude_code_agent_farm.flutter_agent_settings import FlutterAgentSettings
-from claude_code_agent_farm.models import AgentStatus
-from claude_code_agent_farm.utils import check_firebase_emulators_running
+from claude_code_agent_farm.models_new.session import AgentStatus
+from claude_code_agent_farm.utils.flutter_helpers import get_firebase_emulator_status
 
 
 @pytest.mark.e2e
 @pytest.mark.firebase
 class TestFirebaseIntegration:
     """Test Firebase emulator integration and operations."""
-    
+
     @pytest.fixture
     def firebase_project_dir(self, temp_dir):
         """Create a Firebase-enabled Carenji project."""
         project_dir = temp_dir / "firebase_carenji"
         project_dir.mkdir()
-        
+
         # Create pubspec.yaml with Firebase dependencies
         pubspec = """
 name: carenji
@@ -51,50 +48,25 @@ dev_dependencies:
     sdk: flutter
 """
         (project_dir / "pubspec.yaml").write_text(pubspec)
-        
+
         # Create firebase.json
         firebase_config = {
             "emulators": {
-                "auth": {
-                    "port": 9099,
-                    "host": "0.0.0.0"
-                },
-                "functions": {
-                    "port": 5001,
-                    "host": "0.0.0.0"
-                },
-                "firestore": {
-                    "port": 8080,
-                    "host": "0.0.0.0"
-                },
-                "storage": {
-                    "port": 9199,
-                    "host": "0.0.0.0"
-                },
-                "ui": {
-                    "enabled": true,
-                    "port": 4000,
-                    "host": "0.0.0.0"
-                }
+                "auth": {"port": 9099, "host": "0.0.0.0"},
+                "functions": {"port": 5001, "host": "0.0.0.0"},
+                "firestore": {"port": 8080, "host": "0.0.0.0"},
+                "storage": {"port": 9199, "host": "0.0.0.0"},
+                "ui": {"enabled": true, "port": 4000, "host": "0.0.0.0"},
             },
-            "firestore": {
-                "rules": "firestore.rules",
-                "indexes": "firestore.indexes.json"
-            },
-            "storage": {
-                "rules": "storage.rules"
-            }
+            "firestore": {"rules": "firestore.rules", "indexes": "firestore.indexes.json"},
+            "storage": {"rules": "storage.rules"},
         }
         (project_dir / "firebase.json").write_text(json.dumps(firebase_config, indent=2))
-        
+
         # Create .firebaserc
-        firebaserc = {
-            "projects": {
-                "default": "carenji-test"
-            }
-        }
+        firebaserc = {"projects": {"default": "carenji-test"}}
         (project_dir / ".firebaserc").write_text(json.dumps(firebaserc, indent=2))
-        
+
         # Create Firestore rules
         firestore_rules = """
 rules_version = '2';
@@ -128,7 +100,7 @@ service cloud.firestore {
 }
 """
         (project_dir / "firestore.rules").write_text(firestore_rules)
-        
+
         # Create storage rules
         storage_rules = """
 rules_version = '2';
@@ -149,7 +121,7 @@ service firebase.storage {
 }
 """
         (project_dir / "storage.rules").write_text(storage_rules)
-        
+
         # Create Firestore indexes
         indexes = {
             "indexes": [
@@ -158,25 +130,25 @@ service firebase.storage {
                     "queryScope": "COLLECTION",
                     "fields": [
                         {"fieldPath": "patientId", "order": "ASCENDING"},
-                        {"fieldPath": "scheduledTime", "order": "ASCENDING"}
-                    ]
+                        {"fieldPath": "scheduledTime", "order": "ASCENDING"},
+                    ],
                 },
                 {
                     "collectionGroup": "vitals",
                     "queryScope": "COLLECTION",
                     "fields": [
                         {"fieldPath": "patientId", "order": "ASCENDING"},
-                        {"fieldPath": "timestamp", "order": "DESCENDING"}
-                    ]
-                }
+                        {"fieldPath": "timestamp", "order": "DESCENDING"},
+                    ],
+                },
             ]
         }
         (project_dir / "firestore.indexes.json").write_text(json.dumps(indexes, indent=2))
-        
+
         # Create lib structure
         lib_dir = project_dir / "lib"
         lib_dir.mkdir()
-        
+
         # Create Firebase initialization code
         firebase_init = """
 import 'package:firebase_core/firebase_core.dart';
@@ -206,9 +178,9 @@ class FirebaseService {
 }
 """
         (lib_dir / "firebase_service.dart").write_text(firebase_init)
-        
+
         return project_dir
-    
+
     @pytest.fixture
     def monitor_with_firebase(self, firebase_project_dir):
         """Create monitor configured for Firebase testing."""
@@ -216,46 +188,45 @@ class FirebaseService {
             claude_project_path=firebase_project_dir,
             tmux_session_name="test-firebase",
             prompt_text="Test Firebase integration for Carenji",
-            firebase_emulator_host="localhost"
+            firebase_emulator_host="localhost",
         )
-        
+
         with patch("subprocess.run") as mock_run:
             with patch("claude_code_agent_farm.flutter_agent_monitor.signal.signal"):
                 mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
                 monitor = FlutterAgentMonitor(settings)
-                
+
                 # Mock tmux operations
                 monitor._create_tmux_session = Mock()
                 monitor._kill_tmux_session = Mock()
-                
+
                 yield monitor
-    
+
     def test_firebase_emulator_detection(self, monitor_with_firebase):
         """Test detecting Firebase emulator status."""
         monitor = monitor_with_firebase
-        
+
         # Test when emulators are not running
         with patch("claude_code_agent_farm.utils.subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=1, stdout="")
-            
-            running = check_firebase_emulators_running()
-            assert not running
-        
+
+            status = get_firebase_emulator_status()
+            # Check that all services are not running
+            assert all(not running for running in status.values())
+
         # Test when emulators are running
         with patch("claude_code_agent_farm.utils.subprocess.run") as mock_run:
-            mock_run.return_value = Mock(
-                returncode=0,
-                stdout="✔  All emulators ready!"
-            )
-            
-            running = check_firebase_emulators_running()
-            assert running
-    
+            mock_run.return_value = Mock(returncode=0, stdout="✔  All emulators ready!")
+
+            status = get_firebase_emulator_status()
+            # Check that at least some services are running
+            assert any(running for running in status.values())
+
     def test_firebase_queries(self, monitor_with_firebase):
         """Test Firebase-related queries."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         # Mock responses for Firebase operations
         firebase_responses = {
             "setup": """Setting up Firebase for the Carenji project...
@@ -286,7 +257,6 @@ $ firebase emulators:start --only auth,firestore,storage
 
 Firebase emulators are now running for Carenji development.
 >> """,
-            
             "firestore_test": """Testing Firestore operations for Carenji...
 
 Creating test patient document...
@@ -310,7 +280,6 @@ Testing real-time updates...
 
 All Firestore operations completed successfully!
 >> """,
-            
             "auth_test": """Testing Firebase Auth for Carenji staff...
 
 Creating test users...
@@ -333,7 +302,6 @@ Testing family portal access...
 
 All authentication tests passed!
 >> """,
-            
             "storage_test": """Testing Firebase Storage for Carenji...
 
 Uploading patient photo...
@@ -351,30 +319,30 @@ Testing file metadata...
 ✓ Metadata updated with tags
 
 Storage operations completed successfully!
->> """
+>> """,
         }
-        
+
         # Test Firebase setup
         self.response_key = "setup"
-        
+
         def get_response():
             return firebase_responses.get(self.response_key, ">> ")
-        
+
         with patch.object(monitor, "capture_pane_content", side_effect=get_response):
             monitor.settings.prompt_text = "Setup Firebase emulators for Carenji"
             monitor.send_prompt()
-            
+
             response = monitor.capture_pane_content()
             assert "All emulators ready" in response
             assert "localhost:9099" in response  # Auth
             assert "localhost:8080" in response  # Firestore
             assert "localhost:9199" in response  # Storage
-    
+
     def test_firestore_operations(self, monitor_with_firebase):
         """Test Firestore CRUD operations."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         responses = [
             # Create
             "Creating patient record...\n✓ Document created with ID: abc123\n>> ",
@@ -385,38 +353,38 @@ Storage operations completed successfully!
             # Delete
             "Removing expired prescription...\n✓ Document deleted\n>> ",
             # Query
-            "Querying active medications...\n✓ Found 5 active prescriptions\n>> "
+            "Querying active medications...\n✓ Found 5 active prescriptions\n>> ",
         ]
-        
+
         with patch.object(monitor, "capture_pane_content", side_effect=responses):
             # Test each operation
             for i, operation in enumerate(["create", "read", "update", "delete", "query"]):
                 response = monitor.capture_pane_content()
                 assert "✓" in response
                 assert operation in response.lower() or "found" in response.lower()
-    
+
     def test_firebase_error_handling(self, monitor_with_firebase):
         """Test handling Firebase errors."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         error_scenarios = [
             ("PERMISSION_DENIED: Missing or insufficient permissions", AgentStatus.ERROR),
             ("Failed to connect to Firebase emulator at localhost:8080", AgentStatus.ERROR),
             ("Error: Firebase project not initialized", AgentStatus.ERROR),
-            ("FirebaseError: No document to update", AgentStatus.ERROR)
+            ("FirebaseError: No document to update", AgentStatus.ERROR),
         ]
-        
+
         for error_msg, expected_status in error_scenarios:
             with patch.object(monitor, "capture_pane_content", return_value=error_msg):
                 status = monitor.check_agent_status()
                 assert status == expected_status
-    
+
     def test_firebase_security_rules(self, monitor_with_firebase):
         """Test Firebase security rules validation."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         rules_test_response = """Testing Carenji Firebase security rules...
 
 Testing patient data access:
@@ -439,20 +407,20 @@ Testing data validation:
 Security rules validation complete!
 13 tests passed, 5 expected failures
 >> """
-        
+
         with patch.object(monitor, "capture_pane_content", return_value=rules_test_response):
             response = monitor.capture_pane_content()
-            
+
             # Verify security testing
             assert "Security rules validation complete" in response
             assert "13 tests passed" in response
             assert "role-based permissions" in response.lower()
-    
+
     def test_firebase_offline_support(self, monitor_with_firebase):
         """Test Firebase offline capabilities."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         offline_response = """Testing Carenji offline support...
 
 Enabling offline persistence...
@@ -475,44 +443,48 @@ Testing conflict resolution:
 
 Offline support verified for Carenji!
 >> """
-        
+
         with patch.object(monitor, "capture_pane_content", return_value=offline_response):
             response = monitor.capture_pane_content()
-            
+
             assert "offline persistence enabled" in response
             assert "pending writes synchronized" in response
             assert "conflict resolution" in response.lower()
-    
+
     @pytest.mark.docker
     def test_firebase_emulators_in_docker(self, docker_container):
         """Test Firebase emulators running in Docker."""
         # Check if Firebase CLI is available
         result = subprocess.run(
-            ["docker", "exec", docker_container, "firebase", "--version"],
-            capture_output=True,
-            text=True
+            ["docker", "exec", docker_container, "firebase", "--version"], capture_output=True, text=True
         )
-        
+
         if result.returncode != 0:
             pytest.skip("Firebase CLI not available in container")
-        
+
         # Check emulator config
         result = subprocess.run(
-            ["docker", "exec", docker_container, "sh", "-c",
-             "cd /tmp && firebase emulators:exec --only firestore 'echo ready' --project test"],
+            [
+                "docker",
+                "exec",
+                docker_container,
+                "sh",
+                "-c",
+                "cd /tmp && firebase emulators:exec --only firestore 'echo ready' --project test",
+            ],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
-        
+
         # Should at least not crash
         assert "ready" in result.stdout or "emulator" in result.stdout.lower()
-    
+
     def test_realtime_updates(self, monitor_with_firebase):
         """Test Firebase real-time update handling."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         realtime_response = """Setting up real-time listeners for Carenji...
 
 Listening to patient updates...
@@ -530,19 +502,19 @@ Testing listener cleanup...
 
 Real-time synchronization working correctly!
 >> """
-        
+
         with patch.object(monitor, "capture_pane_content", return_value=realtime_response):
             response = monitor.capture_pane_content()
-            
+
             assert "Listener attached" in response
             assert "Patient admitted" in response
             assert "Real-time synchronization working" in response
-    
+
     def test_firebase_data_migration(self, monitor_with_firebase):
         """Test Firebase data migration scenarios."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         migration_response = """Running Carenji data migration...
 
 Analyzing current data structure...
@@ -567,19 +539,19 @@ Verifying data integrity...
 Migration completed successfully!
 Processed 7,062 documents in 4.3 seconds
 >> """
-        
+
         with patch.object(monitor, "capture_pane_content", return_value=migration_response):
             response = monitor.capture_pane_content()
-            
+
             assert "Migration completed successfully" in response
             assert "7,062 documents" in response
             assert "No data loss" in response
-    
+
     def test_firebase_backup_restore(self, monitor_with_firebase):
         """Test Firebase backup and restore operations."""
         monitor = monitor_with_firebase
         monitor.start_agent()
-        
+
         backup_response = """Performing Carenji database backup...
 
 Exporting Firestore data...
@@ -601,10 +573,10 @@ Backup and restore process verified!
 Total backup size: 12.4MB
 Time elapsed: 8.2 seconds
 >> """
-        
+
         with patch.object(monitor, "capture_pane_content", return_value=backup_response):
             response = monitor.capture_pane_content()
-            
+
             assert "backup_2024" in response
             assert "12.4MB" in response
             assert "data integrity" in response
