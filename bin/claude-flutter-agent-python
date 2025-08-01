@@ -88,7 +88,7 @@ def main():
         # Import here after deps are installed
         from claude_code_agent_farm.flutter_agent_cli import app
         
-        # Run the app
+        # Run the app with command line arguments
         app()
         
     except Exception as e:

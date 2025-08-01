@@ -310,3 +310,18 @@ class EventStore(BaseModel):
         if isinstance(event, ErrorEvent):
             return f"Error: {event.error_message}"
         return str(event.event_type)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get a summary of events for checkpointing."""
+        return {
+            "total_events": self.total_count,
+            "event_counts": self.event_counts,
+            "recent_events": [
+                {
+                    "timestamp": e.created_at.isoformat(),
+                    "type": str(e.event_type),
+                    "summary": self._summarize_event(e),
+                }
+                for e in self.get_recent(10)
+            ],
+        }

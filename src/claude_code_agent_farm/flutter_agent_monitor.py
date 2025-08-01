@@ -645,6 +645,11 @@ class FlutterAgentMonitor:
                                 console.print("[yellow]Agent idle, assuming task complete. Restarting...[/yellow]")
                                 self.restart_agent()
 
+                        elif current_status == AgentStatus.READY:
+                            if self.settings.restart_on_complete:
+                                console.print("[yellow]Agent ready, task complete. Restarting...[/yellow]")
+                                self.restart_agent()
+
                         elif current_status == AgentStatus.USAGE_LIMIT and not self.settings.wait_on_limit:
                             console.print("[yellow]Usage limit hit but waiting disabled. Stopping.[/yellow]")
                             self.running = False

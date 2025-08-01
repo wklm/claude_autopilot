@@ -1,0 +1,14 @@
+#!/bin/bash
+# Claude Flutter Agent - Simple wrapper for minimal typing
+# Usage: cfa "your prompt here" or cfa @prompt.md
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Handle the case where the first argument might have spaces
+if [ $# -eq 0 ]; then
+    # No arguments, just run the command
+    exec "$SCRIPT_DIR/claude-flutter-agent-python" run
+else
+    # Pass all arguments as-is
+    exec "$SCRIPT_DIR/claude-flutter-agent-python" run "$@"
+fi

@@ -36,6 +36,10 @@ def version_callback(value: bool) -> None:
 
 @app.command()
 def run(
+    prompt: str | None = typer.Argument(
+        None,
+        help="Prompt text or @filename to read from file",
+    ),
     prompt_file: Path | None = typer.Option(
         None,
         "--prompt-file",
@@ -125,13 +129,24 @@ def run(
     3. .env file in current directory
     4. Flutter project auto-detection
     """
-
     # Build settings kwargs from CLI arguments
     settings_kwargs = {}
 
-    if prompt_file is not None:
+    # Handle positional prompt argument
+    if prompt is not None:
+        if prompt.startswith("@"):
+            # Treat as file path
+            file_path = Path(prompt[1:])
+            if not file_path.exists():
+                console.print(f"[red]Error: Prompt file '{file_path}' not found[/red]")
+                raise typer.Exit(1)
+            settings_kwargs["prompt_file"] = file_path
+        else:
+            # Treat as direct prompt text
+            settings_kwargs["prompt_text"] = prompt
+    elif prompt_file is not None:
         settings_kwargs["prompt_file"] = prompt_file
-    if prompt_text is not None:
+    elif prompt_text is not None:
         settings_kwargs["prompt_text"] = prompt_text
     if project_path is not None:
         settings_kwargs["project_path"] = project_path
