@@ -319,6 +319,58 @@ For more information visit claude.ai"""
         # Test exception
         with patch("subprocess.run", side_effect=Exception("error")):
             assert monitor._has_auto_resume() is False
+    
+    def test_is_claude_running(self, monitor):
+        """Test detecting if Claude is already running."""
+        # Test with Claude UI elements
+        claude_contents = [
+            "│ > Type your request here",
+            "╰──────────────────────────────────────────╯",
+            "╭──────────────────────────────────────────╮",
+            "Welcome to Claude Code!",
+            "✳ Cerebrating… (esc to interrupt)",
+            "? for shortcuts",
+            "claude-code v1.0",
+            "Claude Code is ready",
+        ]
+        
+        for content in claude_contents:
+            with patch.object(monitor, "capture_pane_content", return_value=content):
+                assert monitor._is_claude_running() is True, f"Should detect Claude with: {content}"
+        
+        # Test with non-Claude content (shell prompts)
+        shell_contents = [
+            "$ ",
+            "# ",
+            "",  # Empty
+            "bash-5.1$ ",
+        ]
+        
+        for content in shell_contents:
+            with patch.object(monitor, "capture_pane_content", return_value=content):
+                assert monitor._is_claude_running() is False, f"Should not detect Claude with: {content}"
+        
+        # Test with multi-line content that looks like Claude
+        claude_session = """Claude Code v1.0
+        
+        ╭──────────────────────────────────────────╮
+        │ > Type your request here                 │
+        ╰──────────────────────────────────────────╯"""
+        
+        with patch.object(monitor, "capture_pane_content", return_value=claude_session):
+            assert monitor._is_claude_running() is True
+            
+    def test_start_claude_agent_when_already_running(self, monitor):
+        """Test that startup command is skipped when Claude is already running."""
+        with patch.object(monitor, "_is_claude_running", return_value=True):
+            with patch("claude_code_agent_farm.flutter_agent_monitor.run") as mock_run:
+                with patch.object(monitor, "_has_auto_resume", return_value=True):
+                    monitor.start_claude_agent()
+                    
+                    # Should NOT send any claude startup commands
+                    for call in mock_run.call_args_list:
+                        assert "claude" not in str(call).lower() or "Claude is already running" in str(call)
+                        assert "send-keys" not in str(call)
 
     def test_cleanup(self, monitor):
         """Test cleanup on shutdown."""

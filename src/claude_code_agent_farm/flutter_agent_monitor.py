@@ -132,18 +132,53 @@ class FlutterAgentMonitor:
 
         console.print(f"[green]✓ Created tmux session '{self.settings.tmux_session}'[/green]")
 
+    def _is_claude_running(self) -> bool:
+        """Check if Claude is already running in the tmux pane."""
+        content = self.capture_pane_content()
+        
+        # Check for Claude UI elements
+        claude_indicators = [
+            "│ >",  # Prompt box indicator
+            "╰─",   # Prompt box bottom border
+            "╭─",   # Prompt box top border
+            "Type your request here",
+            "Welcome to Claude",
+            "esc to interrupt",  # Working indicator
+            "? for shortcuts",
+            "claude-code",
+            "Claude Code",
+        ]
+        
+        # If any Claude UI element is present, Claude is running
+        for indicator in claude_indicators:
+            if indicator in content:
+                return True
+                
+        # Also check if the pane looks like a Claude session (not empty, not just shell)
+        if content.strip() and not content.endswith("$ ") and not content.endswith("# "):
+            # If there's content and it doesn't look like a shell prompt, Claude might be running
+            lines = content.strip().split('\n')
+            if len(lines) > 3:  # More than a few lines suggests Claude UI
+                return True
+                
+        return False
+
     def start_claude_agent(self) -> None:
         """Start Claude in the tmux session."""
-        # Start Claude with auto-resume if available
-        claude_cmd = "claude-auto-resume" if self._has_auto_resume() else "claude"
+        # Check if Claude is already running
+        if self._is_claude_running():
+            console.print("[yellow]Claude is already running, skipping startup command[/yellow]")
+        else:
+            # Start Claude with auto-resume if available
+            claude_cmd = "claude-auto-resume" if self._has_auto_resume() else "claude"
 
-        # Add flags
-        claude_cmd += " --dangerously-skip-permissions"
+            # Add flags
+            claude_cmd += " --dangerously-skip-permissions"
 
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{claude_cmd}'", check=True)
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-m", check=True)
+            run(f"tmux send-keys -t {self.settings.tmux_session}:agent '{claude_cmd}'", check=True)
+            run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-m", check=True)
 
-        console.print("[green]✓ Started Claude agent[/green]")
+            console.print("[green]✓ Started Claude agent[/green]")
 
         # Start watchdog timer
         self.watchdog.start()
