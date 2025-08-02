@@ -200,6 +200,15 @@ class FlutterAgentMonitor:
         is_stuck, stuck_reason = self.hung_detector.check_stuck_patterns(content)
         if is_stuck:
             console.print(f"[yellow]Warning: Agent may be stuck - {stuck_reason}[/yellow]")
+            
+        # Debug: log last few lines of content periodically
+        if hasattr(self, '_last_debug_log') and (datetime.now() - self._last_debug_log).total_seconds() > 10:
+            lines = content.strip().split('\n')
+            if lines:
+                console.print(f"[dim]Last line: ...{lines[-1][-80:] if lines[-1] else '(empty)'}[/dim]")
+            self._last_debug_log = datetime.now()
+        elif not hasattr(self, '_last_debug_log'):
+            self._last_debug_log = datetime.now()
 
         # Check for usage limit
         for indicator in constants.USAGE_LIMIT_INDICATORS:
@@ -225,12 +234,18 @@ class FlutterAgentMonitor:
         has_box_border = "╰─" in content
         has_welcome = any(indicator in content for indicator in constants.CLAUDE_WELCOME_INDICATORS)
         
+        # Debug: log what we found
+        if has_prompt_box or has_box_border:
+            console.print(f"[dim]Status check: prompt_box={has_prompt_box}, box_border={has_box_border}, welcome={has_welcome}[/dim]")
+        
         # Ready if we see the prompt box structure
         if has_prompt_box and has_box_border:
+            console.print("[dim]Detected READY: full prompt box structure[/dim]")
             return AgentStatus.READY
         
         # Also ready if we see welcome message with prompt
         if has_welcome and has_prompt_box:
+            console.print("[dim]Detected READY: welcome + prompt[/dim]")
             return AgentStatus.READY
         
         # Sometimes just the prompt indicator is enough
@@ -239,6 +254,7 @@ class FlutterAgentMonitor:
             lines = content.split('\n')
             for line in lines:
                 if "│ >" in line and not any(working in line for working in constants.CLAUDE_WORKING_INDICATORS):
+                    console.print("[dim]Detected READY: prompt indicator in line[/dim]")
                     return AgentStatus.READY
 
         return AgentStatus.UNKNOWN
@@ -609,7 +625,9 @@ class FlutterAgentMonitor:
                     f"Project: {self.settings.project_path}\n"
                     f"Prompt: {self.settings.prompt_text[:100]}{'...' if len(self.settings.prompt_text) > 100 else ''}\n"
                     f"Wait on Limit: {self.settings.wait_on_limit}\n"
-                    f"Restart on Complete: {self.settings.restart_on_complete}",
+                    f"Restart on Complete: {self.settings.restart_on_complete}\n"
+                    f"Idle Timeout: {self.settings.idle_timeout}s\n"
+                    f"Check Interval: {self.settings.check_interval}s",
                     title="Starting Monitor",
                     box=box.ROUNDED,
                 ),
@@ -682,21 +700,39 @@ class FlutterAgentMonitor:
                             console.print("[yellow]Usage limit hit but waiting disabled. Stopping.[/yellow]")
                             self.running = False
                     
-                    # Check for idle timeout when agent is READY
-                    if current_status == AgentStatus.READY and self.last_ready_time:
-                        idle_seconds = (datetime.now() - self.last_ready_time).total_seconds()
+                    # Handle READY state - ensure we track ready time and restart appropriately
+                    if current_status == AgentStatus.READY:
+                        # If we don't have a ready time, set it now
+                        if self.last_ready_time is None:
+                            self.last_ready_time = datetime.now()
+                            console.print("[dim]Agent is ready (setting ready time)[/dim]")
+                            
+                            # If restart_on_complete is true, restart immediately
+                            if self.settings.restart_on_complete:
+                                console.print("[yellow]Agent ready, restarting due to restart_on_complete setting...[/yellow]")
+                                self.restart_agent()
+                                self.last_ready_time = None  # Reset
+                                continue
                         
-                        # If just became ready (< 5 seconds), restart if restart_on_complete is true
-                        if idle_seconds < 5 and self.settings.restart_on_complete:
-                            console.print("[yellow]Agent ready, task complete. Restarting...[/yellow]")
-                            self.restart_agent()
-                            self.last_ready_time = None  # Reset
-                        # If idle for too long, always restart
-                        elif idle_seconds > self.settings.idle_timeout:
-                            console.print(f"[yellow]Agent idle for {int(idle_seconds)}s (>{self.settings.idle_timeout}s). Restarting...[/yellow]")
-                            self.restart_agent()
-                            self.last_ready_time = None  # Reset
+                        # If we already have a ready time, check for timeout
+                        else:
+                            idle_seconds = (datetime.now() - self.last_ready_time).total_seconds()
+                            
+                            # Log current idle time periodically
+                            if int(idle_seconds) % 30 == 0:  # Log every 30 seconds
+                                console.print(f"[dim]Agent idle for {int(idle_seconds)}s[/dim]")
+                            
+                            # If idle for too long, always restart
+                            if idle_seconds > self.settings.idle_timeout:
+                                console.print(f"[yellow]Agent idle for {int(idle_seconds)}s (>{self.settings.idle_timeout}s). Restarting...[/yellow]")
+                                self.restart_agent()
+                                self.last_ready_time = None  # Reset
 
+                    # Reset ready time if agent is no longer ready
+                    if current_status != AgentStatus.READY and self.last_ready_time is not None:
+                        console.print(f"[dim]Agent no longer ready (now {current_status.value}), resetting ready time[/dim]")
+                        self.last_ready_time = None
+                    
                     last_status = current_status
 
                     # Create checkpoint if needed
