@@ -350,14 +350,21 @@ class FlutterAgentMonitor:
             run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-c", check=True)
 
             time.sleep(2)
-
-            # Clear the pane
-            run(f"tmux clear-history -t {self.settings.tmux_session}:agent", check=True)
+            
+            # Check if Claude is still running after Ctrl+C
+            if self._is_claude_running():
+                console.print("[yellow]Claude still running after Ctrl+C, sending prompt directly[/yellow]")
+                # Clear any partial input
+                run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-u", check=True)
+            else:
+                # Claude exited, clear the pane and restart
+                run(f"tmux clear-history -t {self.settings.tmux_session}:agent", check=True)
+                console.print("[dim]Claude exited, restarting...[/dim]")
 
             # Record restart
             self.session.record_restart()
 
-            # Start agent again
+            # Start agent (will check if already running)
             self.start_claude_agent()
             time.sleep(5)
             self.send_prompt()

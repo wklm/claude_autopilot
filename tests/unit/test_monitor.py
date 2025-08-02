@@ -243,25 +243,51 @@ For more information visit claude.ai"""
     def test_restart_agent(self, monitor):
         """Test restarting the agent."""
         with patch("claude_code_agent_farm.flutter_agent_monitor.run") as mock_run:
-            with patch.object(monitor, "start_claude_agent") as mock_start:
-                with patch.object(monitor, "send_prompt") as mock_prompt:
-                    with patch("time.sleep"):
-                        monitor.restart_agent()
+            with patch.object(monitor, "_is_claude_running", return_value=False):  # Claude exits after Ctrl+C
+                with patch.object(monitor, "start_claude_agent") as mock_start:
+                    with patch.object(monitor, "send_prompt") as mock_prompt:
+                        with patch("time.sleep"):
+                            monitor.restart_agent()
 
-                        # Should send Ctrl+C
-                        ctrl_c_call = mock_run.call_args_list[0]
-                        assert "C-c" in str(ctrl_c_call)
+                            # Should send Ctrl+C
+                            ctrl_c_calls = [call for call in mock_run.call_args_list if "C-c" in str(call)]
+                            assert len(ctrl_c_calls) > 0, "Should send Ctrl+C"
 
-                        # Should clear history
-                        clear_call = mock_run.call_args_list[1]
-                        assert "clear-history" in str(clear_call)
+                            # Should clear history when Claude exits
+                            clear_calls = [call for call in mock_run.call_args_list if "clear-history" in str(call)]
+                            assert len(clear_calls) > 0, "Should clear history when Claude exits"
 
-                        # Should restart
-                        mock_start.assert_called_once()
-                        mock_prompt.assert_called_once()
+                            # Should restart
+                            mock_start.assert_called_once()
+                            mock_prompt.assert_called_once()
 
-                        # Check restart counter
-                        assert monitor.session.restart_count == 1
+                            # Check restart counter
+                            assert monitor.session.restart_count == 1
+                            
+    def test_restart_agent_claude_still_running(self, monitor):
+        """Test restarting when Claude is still running after Ctrl+C."""
+        with patch("claude_code_agent_farm.flutter_agent_monitor.run") as mock_run:
+            with patch.object(monitor, "_is_claude_running", return_value=True):  # Claude still running
+                with patch.object(monitor, "start_claude_agent") as mock_start:
+                    with patch.object(monitor, "send_prompt") as mock_prompt:
+                        with patch("time.sleep"):
+                            monitor.restart_agent()
+
+                            # Should send Ctrl+C
+                            ctrl_c_calls = [call for call in mock_run.call_args_list if "C-c" in str(call)]
+                            assert len(ctrl_c_calls) > 0, "Should send Ctrl+C"
+
+                            # Should send Ctrl+U to clear partial input
+                            ctrl_u_calls = [call for call in mock_run.call_args_list if "C-u" in str(call)]
+                            assert len(ctrl_u_calls) > 0, "Should send Ctrl+U when Claude still running"
+
+                            # Should NOT clear history when Claude is still running
+                            clear_calls = [call for call in mock_run.call_args_list if "clear-history" in str(call)]
+                            assert len(clear_calls) == 0, "Should not clear history when Claude still running"
+
+                            # Should still call start and prompt
+                            mock_start.assert_called_once()
+                            mock_prompt.assert_called_once()
 
     def test_wait_for_usage_limit(self, monitor):
         """Test waiting for usage limit expiry."""
