@@ -71,6 +71,8 @@ class TestFlutterAgentMonitor:
 
             assert create_call is not None
             assert monitor.settings.tmux_session in str(create_call)
+            # Verify -c option with project path is included
+            assert f"-c {monitor.settings.project_path}" in str(create_call)
 
     def test_start_claude_agent(self, monitor):
         """Test starting Claude agent."""
@@ -78,12 +80,12 @@ class TestFlutterAgentMonitor:
             with patch.object(monitor, "_has_auto_resume", return_value=True):
                 monitor.start_claude_agent()
 
-                # Should send cd command
-                cd_call = mock_run.call_args_list[0]
-                assert f"cd {monitor.settings.project_path}" in str(cd_call)
+                # Should NOT send cd command anymore
+                for call_args in mock_run.call_args_list:
+                    assert "cd " not in str(call_args), "cd command should not be sent"
 
                 # Should start claude-auto-resume
-                claude_call = mock_run.call_args_list[1]
+                claude_call = mock_run.call_args_list[0]
                 assert "claude-auto-resume" in str(claude_call)
                 assert "--dangerously-skip-permissions" in str(claude_call)
 
@@ -93,7 +95,11 @@ class TestFlutterAgentMonitor:
             with patch.object(monitor, "_has_auto_resume", return_value=False):
                 monitor.start_claude_agent()
 
-                claude_call = mock_run.call_args_list[1]
+                # Should NOT send cd command
+                for call_args in mock_run.call_args_list:
+                    assert "cd " not in str(call_args), "cd command should not be sent"
+
+                claude_call = mock_run.call_args_list[0]
                 assert "claude --dangerously-skip-permissions" in str(claude_call)
                 assert "claude-auto-resume" not in str(claude_call)
 

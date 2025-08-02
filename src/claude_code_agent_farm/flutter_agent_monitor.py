@@ -124,8 +124,8 @@ class FlutterAgentMonitor:
         # Kill existing session if it exists
         run(f"tmux kill-session -t {self.settings.tmux_session}", check=False, quiet=True)
 
-        # Create new session
-        run(f"tmux new-session -d -s {self.settings.tmux_session} -n agent", check=True)
+        # Create new session with initial directory set to project path
+        run(f"tmux new-session -d -s {self.settings.tmux_session} -n agent -c {self.settings.project_path}", check=True)
 
         # Configure tmux
         run(f"tmux set-option -t {self.settings.tmux_session} -g mouse on", quiet=True)
@@ -134,10 +134,6 @@ class FlutterAgentMonitor:
 
     def start_claude_agent(self) -> None:
         """Start Claude in the tmux session."""
-        # Change to project directory
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent 'cd {self.settings.project_path}'", check=True)
-        run(f"tmux send-keys -t {self.settings.tmux_session}:agent C-m", check=True)
-
         # Start Claude with auto-resume if available
         claude_cmd = "claude-auto-resume" if self._has_auto_resume() else "claude"
 
