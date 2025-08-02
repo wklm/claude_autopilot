@@ -49,11 +49,15 @@ CLAUDE_ERROR_INDICATORS = [
 ]
 
 CLAUDE_WORKING_INDICATORS = [
+    # Primary indicator - Claude shows this when actively working
+    "esc to interrupt",  # This is the most reliable indicator
+    
+    # Additional working state messages (may appear with "esc to interrupt")
     "✻ Pontificating",
     "● Bash(",
-    "✻ Running",
+    "✻ Running", 
     "✻ Thinking",
-    "esc to interrupt",
+    "✳ Cerebrating",
     # Legacy indicators (keep for compatibility)
     "thinking...",
     "analyzing...",
@@ -61,9 +65,11 @@ CLAUDE_WORKING_INDICATORS = [
 ]
 
 CLAUDE_READY_INDICATORS = [
+    # Note: These are no longer used for primary status detection
+    # We now use the absence of "esc to interrupt" to detect READY state
+    # Kept for reference and potential future use
     "│ >",  # Claude Code's prompt box indicator
     "╰─",   # Prompt box bottom border (correct character)
-    # Combination patterns will be checked in code
 ]
 
 # Additional patterns for ready state detection

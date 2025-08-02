@@ -131,15 +131,17 @@ class TestFlutterAgentMonitor:
 
     def test_check_agent_status_working(self, monitor):
         """Test detecting working status."""
+        # Primary test case - the key indicator
+        content = "✳ Cerebrating… (2s · ↓ 9 tokens · esc to interrupt)"
+        with patch.object(monitor, "capture_pane_content", return_value=content):
+            status = monitor.check_agent_status()
+            assert status == AgentStatus.WORKING
+            
+        # Other examples with "esc to interrupt"
         test_cases = [
-            "✻ Pontificating about the solution",
-            "● Bash(running tests)",
-            "✻ Running the command",
-            "✻ Thinking about the problem",
-            "Press esc to interrupt the current operation",
-            # Legacy indicators (these should match what's in constants.py)
-            "thinking...",
-            "analyzing...",
+            "✻ Pontificating... (esc to interrupt)",
+            "● Bash(running tests) - press esc to interrupt",
+            "Some output with esc to interrupt somewhere",
         ]
 
         for content in test_cases:
@@ -148,8 +150,8 @@ class TestFlutterAgentMonitor:
                 assert status == AgentStatus.WORKING, f"Failed for content: {content}"
 
     def test_check_agent_status_ready(self, monitor):
-        """Test detecting ready status with Claude Code patterns."""
-        # Test case 1: Full prompt box structure
+        """Test detecting ready status - absence of 'esc to interrupt'."""
+        # Test case 1: Output without "esc to interrupt" means ready
         content1 = """╭──────────────────────────────────────────────────────────────────────────────╮
 │ > Type your request here                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"""
@@ -158,16 +160,17 @@ class TestFlutterAgentMonitor:
             status = monitor.check_agent_status()
             assert status == AgentStatus.READY
             
-        # Test case 2: Welcome message with prompt
-        content2 = """Welcome to Claude Code!
-│ > Ready for your command"""
+        # Test case 2: Task output without working indicator
+        content2 = """Task completed successfully
+Some other output
+No working indicators here"""
         
         with patch.object(monitor, "capture_pane_content", return_value=content2):
             status = monitor.check_agent_status()
             assert status == AgentStatus.READY
             
-        # Test case 3: Just prompt indicator with content
-        content3 = "Previous output here\n│ > "
+        # Test case 3: Empty or minimal content (still ready if no "esc to interrupt")
+        content3 = "Claude Code v1.0"
         
         with patch.object(monitor, "capture_pane_content", return_value=content3):
             status = monitor.check_agent_status()
@@ -397,24 +400,27 @@ For more information visit claude.ai"""
                         # Verify ready time was reset
                         assert monitor.last_ready_time is None
                             
-    def test_check_agent_status_unknown(self, monitor):
-        """Test detecting unknown status when patterns don't match."""
+    def test_check_agent_status_simplified(self, monitor):
+        """Test that status detection is now simplified - no UNKNOWN state."""
+        # With new logic, everything without "esc to interrupt" is READY
         test_cases = [
             "Random output that doesn't match any pattern",
             "",  # Empty content
             "Some terminal output\nwithout any indicators",
-            # Note: "│ >" alone is considered READY due to our fallback logic
+            "│ >",  # Prompt indicator
+            "Just some text",
         ]
         
         for content in test_cases:
             with patch.object(monitor, "capture_pane_content", return_value=content):
                 status = monitor.check_agent_status()
-                assert status == AgentStatus.UNKNOWN, f"Expected UNKNOWN for content: {content}"
+                # Should be READY since no "esc to interrupt" found
+                assert status == AgentStatus.READY, f"Expected READY for content: {content}"
                 
-        # Test edge case - prompt indicator alone is actually considered ready
-        with patch.object(monitor, "capture_pane_content", return_value="│ >"):
+        # Only WORKING if "esc to interrupt" is present
+        with patch.object(monitor, "capture_pane_content", return_value="Working... (esc to interrupt)"):
             status = monitor.check_agent_status()
-            assert status == AgentStatus.READY  # This is by design
+            assert status == AgentStatus.WORKING
                 
     def test_status_transitions_and_events(self, monitor):
         """Test that status transitions are properly recorded."""

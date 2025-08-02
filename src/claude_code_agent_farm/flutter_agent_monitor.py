@@ -222,42 +222,22 @@ class FlutterAgentMonitor:
             if indicator in content:
                 return AgentStatus.ERROR
 
-        # Check if working (highest priority after errors)
-        for indicator in constants.CLAUDE_WORKING_INDICATORS:
-            if indicator in content:
-                self.watchdog.feed(ActivityType.TASK_PROGRESS, f"Agent working: {indicator}")
-                return AgentStatus.WORKING
-
-        # Check if ready - Claude Code shows prompt box when ready
-        # Look for multiple indicators to be sure
-        has_prompt_box = "│ >" in content
-        has_box_border = "╰─" in content
-        has_welcome = any(indicator in content for indicator in constants.CLAUDE_WELCOME_INDICATORS)
+        # Check if working - "esc to interrupt" is the key indicator
+        if "esc to interrupt" in content:
+            self.watchdog.feed(ActivityType.TASK_PROGRESS, "Agent working: esc to interrupt detected")
+            return AgentStatus.WORKING
         
-        # Debug: log what we found
-        if has_prompt_box or has_box_border:
-            console.print(f"[dim]Status check: prompt_box={has_prompt_box}, box_border={has_box_border}, welcome={has_welcome}[/dim]")
+        # If not working (no "esc to interrupt") and no errors/limits, then Claude has finished
+        # This is much more reliable than looking for specific UI patterns
+        # Only log this occasionally to avoid spam
+        if hasattr(self, '_last_ready_log') and (datetime.now() - self._last_ready_log).total_seconds() > 30:
+            console.print("[dim]No 'esc to interrupt' found - agent is ready/finished[/dim]")
+            self._last_ready_log = datetime.now()
+        elif not hasattr(self, '_last_ready_log'):
+            console.print("[dim]No 'esc to interrupt' found - agent is ready/finished[/dim]")
+            self._last_ready_log = datetime.now()
         
-        # Ready if we see the prompt box structure
-        if has_prompt_box and has_box_border:
-            console.print("[dim]Detected READY: full prompt box structure[/dim]")
-            return AgentStatus.READY
-        
-        # Also ready if we see welcome message with prompt
-        if has_welcome and has_prompt_box:
-            console.print("[dim]Detected READY: welcome + prompt[/dim]")
-            return AgentStatus.READY
-        
-        # Sometimes just the prompt indicator is enough
-        if has_prompt_box and len(content.strip()) > 0:
-            # Verify it's not a false positive by checking context
-            lines = content.split('\n')
-            for line in lines:
-                if "│ >" in line and not any(working in line for working in constants.CLAUDE_WORKING_INDICATORS):
-                    console.print("[dim]Detected READY: prompt indicator in line[/dim]")
-                    return AgentStatus.READY
-
-        return AgentStatus.UNKNOWN
+        return AgentStatus.READY
 
     def _handle_usage_limit(self, content: str) -> None:
         """Handle usage limit detection and parsing with exponential backoff."""
