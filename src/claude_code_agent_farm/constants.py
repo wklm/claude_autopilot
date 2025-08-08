@@ -6,6 +6,7 @@ specifically tailored for Flutter & Firebase development with the carenji app.
 
 # Claude Status Indicators
 USAGE_LIMIT_INDICATORS = [
+    "Claude usage limit reached",
     "usage limit reached",
     "daily limit exceeded",
     "usage quota exceeded",
@@ -17,8 +18,6 @@ USAGE_LIMIT_INDICATORS = [
     "usage limits have been reached",
     "you've hit your rate limit",
     "rate limit hit",
-    "usage limit hit",
-    "limit exceeded",
     "quota limit reached",
     "maximum usage reached",
     "too many requests",
@@ -27,7 +26,6 @@ USAGE_LIMIT_INDICATORS = [
     "retry after",
     "available again at",
     "usage will reset at",
-    "limit will reset",
     "try again tomorrow",
     "daily quota reached",
     "hourly limit reached",
@@ -55,7 +53,7 @@ CLAUDE_WORKING_INDICATORS = [
     # Additional working state messages (may appear with "esc to interrupt")
     "✻ Pontificating",
     "● Bash(",
-    "✻ Running", 
+    "✻ Running",
     "✻ Thinking",
     "✳ Cerebrating",
     # Legacy indicators (keep for compatibility)

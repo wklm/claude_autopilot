@@ -25,7 +25,6 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "Topic :: Utilities",
     "Topic :: Software Development :: Build Tools",
-    "Framework :: Flutter",
     "Topic :: Database :: Front-Ends",
     "Typing :: Typed",
 ]
@@ -145,12 +144,22 @@ combine-as-imports = true
 python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
-ignore_missing_imports = true
+ignore_missing_imports = false
 strict_optional = true
-disallow_untyped_defs = false
+disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
+disallow_any_explicit = false
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["typer", "rich.*", "pydantic.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
