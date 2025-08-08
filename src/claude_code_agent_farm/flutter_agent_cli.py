@@ -145,6 +145,9 @@ def run(
             # Treat as direct prompt text
             settings_kwargs["prompt_text"] = prompt
     elif prompt_file is not None:
+        # Ensure the path is resolved relative to current working directory
+        if not prompt_file.is_absolute():
+            prompt_file = Path.cwd() / prompt_file
         settings_kwargs["prompt_file"] = prompt_file
     elif prompt_text is not None:
         settings_kwargs["prompt_text"] = prompt_text
@@ -170,7 +173,17 @@ def run(
         if settings_kwargs:
             # Load base settings first, then override with CLI
             base_settings = load_settings()
-            settings = FlutterAgentSettings(**{**base_settings.model_dump(), **settings_kwargs})
+            # Create a proper merge that preserves Path objects
+            merged_settings = {}
+            # Get all field names from the model
+            for field_name in base_settings.model_fields:
+                # Use CLI override if provided, otherwise use base setting
+                if field_name in settings_kwargs:
+                    merged_settings[field_name] = settings_kwargs[field_name]
+                else:
+                    # Get the actual value (not converted to string)
+                    merged_settings[field_name] = getattr(base_settings, field_name)
+            settings = FlutterAgentSettings(**merged_settings)
         else:
             # No CLI overrides, use settings as-is
             settings = load_settings()

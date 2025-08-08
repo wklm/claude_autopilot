@@ -4,10 +4,18 @@ Specialized monitoring for Flutter app development with Firebase backend,
 including Firebase emulator integration and Flutter MCP documentation support.
 """
 
+from __future__ import annotations
+
 import signal
 import subprocess
 import time
-from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from claude_code_agent_farm.utils import now_utc
+
+if TYPE_CHECKING:
+    from claude_code_agent_farm.models_new.retry_strategy import UsageLimitRetryInfo
+    from claude_code_agent_farm.models_new.session import AgentSession
 
 from rich import box
 from rich.console import Console
@@ -88,7 +96,7 @@ class FlutterAgentMonitor:
             jitter_factor=0.1,
             max_retry_attempts=10,
         )
-        self.current_usage_limit_info = None
+        self.current_usage_limit_info: UsageLimitRetryInfo | None = None
 
         # Health monitoring
         self.health_monitor = AgentHealthMonitor(check_interval_seconds=30, unhealthy_threshold=3)
@@ -112,7 +120,7 @@ class FlutterAgentMonitor:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _signal_handler(self, sig: int, frame: any) -> None:
+    def _signal_handler(self, sig: int, frame: Any) -> None:
         """Handle shutdown signals gracefully."""
         if not self.shutting_down:
             self.shutting_down = True
@@ -188,8 +196,15 @@ class FlutterAgentMonitor:
 
     def send_prompt(self) -> None:
         """Send the prompt to Claude."""
+        # Get the prompt (handles both prompt_text and prompt_file)
+        try:
+            prompt = self.settings.prompt
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return
+            
         # Escape special characters in prompt
-        escaped_prompt = self.settings.prompt_text.replace("'", "'\"'\"'")
+        escaped_prompt = prompt.replace("'", "'\"'\"'")
         
         # Append ultrathink to enable thinking mode
         enhanced_prompt = f"{escaped_prompt} ultrathink"
@@ -233,20 +248,22 @@ class FlutterAgentMonitor:
             console.print(f"[yellow]Warning: Agent may be stuck - {stuck_reason}[/yellow]")
             
         # Debug: log last few lines of content periodically
-        if hasattr(self, '_last_debug_log') and (datetime.now() - self._last_debug_log).total_seconds() > 10:
+        if hasattr(self, '_last_debug_log') and (now_utc() - self._last_debug_log).total_seconds() > 10:
             lines = content.strip().split('\n')
             if lines:
                 console.print(f"[dim]Last line: ...{lines[-1][-80:] if lines[-1] else '(empty)'}[/dim]")
-            self._last_debug_log = datetime.now()
+            self._last_debug_log = now_utc()
         elif not hasattr(self, '_last_debug_log'):
-            self._last_debug_log = datetime.now()
+            self._last_debug_log = now_utc()
 
-        # Check for usage limit
-        for indicator in constants.USAGE_LIMIT_INDICATORS:
-            if indicator.lower() in content.lower():
-                # Parse the usage limit message
-                self._handle_usage_limit(content)
-                return AgentStatus.USAGE_LIMIT
+        # Check for usage limit (exclude "approaching" messages)
+        content_lower = content.lower()
+        if "approaching" not in content_lower:
+            for indicator in constants.USAGE_LIMIT_INDICATORS:
+                if indicator.lower() in content_lower:
+                    # Parse the usage limit message
+                    self._handle_usage_limit(content)
+                    return AgentStatus.USAGE_LIMIT
 
         # Check for errors
         for indicator in constants.CLAUDE_ERROR_INDICATORS:
@@ -261,12 +278,9 @@ class FlutterAgentMonitor:
         # If not working (no "esc to interrupt") and no errors/limits, then Claude has finished
         # This is much more reliable than looking for specific UI patterns
         # Only log this occasionally to avoid spam
-        if hasattr(self, '_last_ready_log') and (datetime.now() - self._last_ready_log).total_seconds() > 30:
+        if (hasattr(self, '_last_ready_log') and (now_utc() - self._last_ready_log).total_seconds() > 30) or not hasattr(self, '_last_ready_log'):
             console.print("[dim]No 'esc to interrupt' found - agent is ready/finished[/dim]")
-            self._last_ready_log = datetime.now()
-        elif not hasattr(self, '_last_ready_log'):
-            console.print("[dim]No 'esc to interrupt' found - agent is ready/finished[/dim]")
-            self._last_ready_log = datetime.now()
+            self._last_ready_log = now_utc()
         
         return AgentStatus.READY
 
@@ -277,7 +291,9 @@ class FlutterAgentMonitor:
         lines = content.split("\n")
 
         for i, line in enumerate(lines):
-            if any(indicator.lower() in line.lower() for indicator in constants.USAGE_LIMIT_INDICATORS):
+            line_lower = line.lower()
+            # Skip lines containing "approaching"
+            if "approaching" not in line_lower and any(indicator.lower() in line_lower for indicator in constants.USAGE_LIMIT_INDICATORS):
                 # Get this line and the next few for context
                 usage_lines = lines[i : i + 3]
                 break
@@ -285,11 +301,11 @@ class FlutterAgentMonitor:
         usage_message = "\n".join(usage_lines)
 
         # Parse retry time
-        retry_time = self.time_parser.parse_usage_limit_message(usage_message)
+        time_info = self.time_parser.parse_usage_limit_message(usage_message)
 
         # Create enhanced usage limit info with retry strategy
         self.current_usage_limit_info = UsageLimitRetryInfo(message=usage_message, retry_strategy=self.retry_strategy)
-        self.current_usage_limit_info.set_parsed_time(retry_time)
+        self.current_usage_limit_info.set_parsed_time(time_info.retry_time)
 
         # Record retry attempt
         self.retry_strategy.record_retry_attempt()
@@ -301,7 +317,7 @@ class FlutterAgentMonitor:
         limit_info = UsageLimitInfo(
             message=usage_message,
             retry_time=effective_retry_time,
-            wait_duration=effective_retry_time - datetime.now() if effective_retry_time else None,
+            wait_duration=effective_retry_time - now_utc() if effective_retry_time else None,
         )
 
         # Record in session
@@ -335,7 +351,7 @@ class FlutterAgentMonitor:
 
         # Create health check for this restart
         restart_health = RestartHealthCheck()
-        restart_start = datetime.now()
+        restart_start = now_utc()
 
         # Pre-restart health checks
         pre_checks = self._perform_pre_restart_checks()
@@ -377,7 +393,7 @@ class FlutterAgentMonitor:
 
             # Mark restart completion
             restart_health.restart_timestamp = restart_start
-            restart_health.restart_duration_ms = int((datetime.now() - restart_start).total_seconds() * 1000)
+            restart_health.restart_duration_ms = int((now_utc() - restart_start).total_seconds() * 1000)
             restart_health.restart_successful = restart_health.all_post_checks_healthy
 
             if restart_health.restart_successful:
@@ -399,7 +415,7 @@ class FlutterAgentMonitor:
         if not self.session.wait_until:
             return
 
-        wait_seconds = (self.session.wait_until - datetime.now()).total_seconds()
+        wait_seconds = (self.session.wait_until - now_utc()).total_seconds()
         if wait_seconds <= 0:
             self.session.is_waiting_for_limit = False
             self.session.wait_until = None
@@ -424,7 +440,7 @@ class FlutterAgentMonitor:
     def get_status_display(self) -> Table:
         """Get a status table for display."""
         table = Table(
-            title=f"Claude Flutter Agent Monitor - {datetime.now().strftime('%H:%M:%S')}",
+            title=f"Claude Flutter Agent Monitor - {now_utc().strftime('%H:%M:%S')}",
             box=box.ROUNDED,
         )
 
@@ -440,7 +456,7 @@ class FlutterAgentMonitor:
         table.add_row("Usage Limit Hits", str(self.session.usage_limit_hits))
 
         if self.session.is_waiting_for_limit and self.session.wait_until:
-            wait_remaining = (self.session.wait_until - datetime.now()).total_seconds()
+            wait_remaining = (self.session.wait_until - now_utc()).total_seconds()
             if wait_remaining > 0:
                 table.add_row("Waiting Until", self.time_parser.format_retry_time(self.session.wait_until))
                 table.add_row("Wait Remaining", f"{int(wait_remaining)} seconds")
@@ -492,7 +508,7 @@ class FlutterAgentMonitor:
                 "watchdog_state": self.watchdog.model_dump(),
                 "events_summary": self.events.get_summary(),
                 "last_pane_content": self.capture_pane_content()[:1000],  # First 1000 chars
-                "metadata": {"settings": self.settings.model_dump(), "timestamp": datetime.now().isoformat()},
+                "metadata": {"settings": self.settings.model_dump(), "timestamp": now_utc().isoformat()},
             }
 
             checkpoint = self.checkpoint_manager.create_checkpoint(checkpoint_data)
@@ -641,7 +657,7 @@ class FlutterAgentMonitor:
                 Panel(
                     f"[bold cyan]Claude Flutter Agent Monitor[/bold cyan]\n\n"
                     f"Project: {self.settings.project_path}\n"
-                    f"Prompt: {self.settings.prompt_text[:100]}{'...' if len(self.settings.prompt_text) > 100 else ''}\n"
+                    f"Prompt: {self.settings.prompt_display}\n"
                     f"Wait on Limit: {self.settings.wait_on_limit}\n"
                     f"Restart on Complete: {self.settings.restart_on_complete}\n"
                     f"Idle Timeout: {self.settings.idle_timeout}s\n"
@@ -705,8 +721,15 @@ class FlutterAgentMonitor:
                         
                         # Track when agent becomes ready (task completed)
                         if current_status == AgentStatus.READY and last_status == AgentStatus.WORKING:
-                            self.last_ready_time = datetime.now()
+                            self.last_ready_time = now_utc()
                             console.print("[dim]Agent task completed, now ready[/dim]")
+                            
+                            # Check if we should restart on complete
+                            if self.settings.restart_on_complete:
+                                console.print("[yellow]Task completed, restarting due to restart_on_complete setting...[/yellow]")
+                                self.restart_agent()
+                                self.last_ready_time = None  # Reset
+                                continue
 
                         # Handle different statuses
                         if current_status == AgentStatus.ERROR:
@@ -718,33 +741,19 @@ class FlutterAgentMonitor:
                             console.print("[yellow]Usage limit hit but waiting disabled. Stopping.[/yellow]")
                             self.running = False
                     
-                    # Handle READY state - ensure we track ready time and restart appropriately
-                    if current_status == AgentStatus.READY:
-                        # If we don't have a ready time, set it now
-                        if self.last_ready_time is None:
-                            self.last_ready_time = datetime.now()
-                            console.print("[dim]Agent is ready (setting ready time)[/dim]")
-                            
-                            # If restart_on_complete is true, restart immediately
-                            if self.settings.restart_on_complete:
-                                console.print("[yellow]Agent ready, restarting due to restart_on_complete setting...[/yellow]")
-                                self.restart_agent()
-                                self.last_ready_time = None  # Reset
-                                continue
+                    # Handle READY state - check for idle timeout
+                    if current_status == AgentStatus.READY and self.last_ready_time is not None:
+                        idle_seconds = (now_utc() - self.last_ready_time).total_seconds()
                         
-                        # If we already have a ready time, check for timeout
-                        else:
-                            idle_seconds = (datetime.now() - self.last_ready_time).total_seconds()
-                            
-                            # Log current idle time periodically
-                            if int(idle_seconds) % 30 == 0:  # Log every 30 seconds
-                                console.print(f"[dim]Agent idle for {int(idle_seconds)}s[/dim]")
-                            
-                            # If idle for too long, always restart
-                            if idle_seconds > self.settings.idle_timeout:
-                                console.print(f"[yellow]Agent idle for {int(idle_seconds)}s (>{self.settings.idle_timeout}s). Restarting...[/yellow]")
-                                self.restart_agent()
-                                self.last_ready_time = None  # Reset
+                        # Log current idle time periodically
+                        if int(idle_seconds) % 30 == 0:  # Log every 30 seconds
+                            console.print(f"[dim]Agent idle for {int(idle_seconds)}s[/dim]")
+                        
+                        # If idle for too long, restart
+                        if idle_seconds > self.settings.idle_timeout:
+                            console.print(f"[yellow]Agent idle for {int(idle_seconds)}s (>{self.settings.idle_timeout}s). Restarting...[/yellow]")
+                            self.restart_agent()
+                            self.last_ready_time = None  # Reset
 
                     # Reset ready time if agent is no longer ready
                     if current_status != AgentStatus.READY and self.last_ready_time is not None:

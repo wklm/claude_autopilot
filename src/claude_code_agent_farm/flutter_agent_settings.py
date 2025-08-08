@@ -80,6 +80,7 @@ class FlutterAgentSettings(BaseSettings):
 
     usage_limit_check_patterns: list[str] = Field(
         default=[
+            "Claude usage limit reached",
             "usage limit reached",
             "daily limit exceeded",
             "usage quota exceeded",
