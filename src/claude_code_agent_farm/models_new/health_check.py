@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from claude_code_agent_farm.utils import now_utc
+
 
 class HealthStatus(str, Enum):
     """Health check status."""
@@ -33,7 +35,7 @@ class HealthCheckResult(BaseModel):
     check_type: HealthCheckType
     status: HealthStatus
     message: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=now_utc)
     duration_ms: int | None = Field(default=None, description="Check duration in milliseconds")
     details: dict[str, Any] = Field(default_factory=dict)
 
@@ -84,7 +86,7 @@ class RestartAttemptTracker(BaseModel):
 
     def can_restart(self) -> tuple[bool, str | None]:
         """Check if a restart is allowed based on limits and cooldown."""
-        now = datetime.now()
+        now = now_utc()
 
         # Clean up old attempts outside the window
         cutoff_time = now - timedelta(seconds=self.attempt_window_seconds)
@@ -109,7 +111,7 @@ class RestartAttemptTracker(BaseModel):
 
     def record_attempt(self, health_check: RestartHealthCheck | None = None) -> None:
         """Record a restart attempt."""
-        self.attempts.append(datetime.now())
+        self.attempts.append(now_utc())
         if health_check:
             self.health_checks.append(health_check)
 
@@ -140,7 +142,7 @@ class AgentHealthMonitor(BaseModel):
 
     def record_check(self, result: HealthCheckResult) -> None:
         """Record a health check result and update status."""
-        self.last_check_time = datetime.now()
+        self.last_check_time = now_utc()
         self.check_history.append(result)
 
         # Maintain history limit
@@ -164,12 +166,12 @@ class AgentHealthMonitor(BaseModel):
 
         # Record status change
         if old_status != self.current_status:
-            self.status_changes.append((datetime.now(), old_status, self.current_status))
+            self.status_changes.append((now_utc(), old_status, self.current_status))
 
     def should_check(self) -> bool:
         """Check if it's time for another health check."""
         if self.last_check_time is None:
             return True
 
-        time_since_last = (datetime.now() - self.last_check_time).total_seconds()
+        time_since_last = (now_utc() - self.last_check_time).total_seconds()
         return time_since_last >= self.check_interval_seconds

@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from claude_code_agent_farm.models_new.session import AgentStatus
+from claude_code_agent_farm.utils import now_utc
 
 
 class CheckpointData(BaseModel):
@@ -15,8 +16,8 @@ class CheckpointData(BaseModel):
 
     # Session identification
     session_id: str
-    checkpoint_id: str = Field(default_factory=lambda: datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
-    created_at: datetime = Field(default_factory=datetime.now)
+    checkpoint_id: str = Field(default_factory=lambda: now_utc().strftime("%Y%m%d_%H%M%S_%f"))
+    created_at: datetime = Field(default_factory=now_utc)
 
     # Session state
     prompt: str
@@ -69,7 +70,7 @@ class CheckpointManager(BaseModel):
         if self.last_checkpoint_time is None:
             return True
 
-        time_since_last = (datetime.now() - self.last_checkpoint_time).total_seconds()
+        time_since_last = (now_utc() - self.last_checkpoint_time).total_seconds()
         return time_since_last >= self.checkpoint_interval_seconds
 
     def create_checkpoint(self, session_data: dict[str, Any]) -> CheckpointData:
@@ -91,7 +92,7 @@ class CheckpointManager(BaseModel):
         # Save to disk
         self._save_checkpoint(checkpoint)
 
-        self.last_checkpoint_time = datetime.now()
+        self.last_checkpoint_time = now_utc()
         return checkpoint
 
     def _save_checkpoint(self, checkpoint: CheckpointData) -> None:
@@ -145,7 +146,7 @@ class CheckpointManager(BaseModel):
 
     def clean_old_checkpoints(self, days: int = 7) -> int:
         """Clean checkpoints older than specified days."""
-        cutoff_time = datetime.now().timestamp() - (days * 24 * 60 * 60)
+        cutoff_time = now_utc().timestamp() - (days * 24 * 60 * 60)
         removed_count = 0
 
         for session_dir in self.checkpoint_dir.iterdir():
@@ -186,7 +187,7 @@ class RecoveryStrategy(BaseModel):
             return False, "No checkpoint available"
 
         # Check if checkpoint is too old
-        age_seconds = (datetime.now() - checkpoint.created_at).total_seconds()
+        age_seconds = (now_utc() - checkpoint.created_at).total_seconds()
         if age_seconds > self.recovery_timeout_seconds:
             return False, f"Checkpoint is too old ({int(age_seconds)} seconds)"
 

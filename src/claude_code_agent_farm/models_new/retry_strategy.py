@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel, Field
 
+from claude_code_agent_farm.utils import now_utc
+
 
 class RetryStrategy(BaseModel):
     """Configuration for retry behavior with exponential backoff."""
@@ -47,7 +49,7 @@ class RetryStrategy(BaseModel):
         # Check if we're within the retry window
         if self.retry_history:
             oldest_retry = self.retry_history[0]
-            if datetime.now() - oldest_retry > timedelta(hours=self.retry_window_hours):
+            if now_utc() - oldest_retry > timedelta(hours=self.retry_window_hours):
                 # Reset if outside window
                 self.reset()
 
@@ -55,7 +57,7 @@ class RetryStrategy(BaseModel):
 
     def record_retry_attempt(self) -> None:
         """Record a retry attempt."""
-        now = datetime.now()
+        now = now_utc()
         self.current_attempt += 1
         self.last_retry_time = now
         self.retry_history.append(now)
@@ -73,14 +75,14 @@ class RetryStrategy(BaseModel):
     def get_next_retry_time(self) -> datetime:
         """Get the next retry time based on current state."""
         delay_seconds = self.calculate_next_delay()
-        return datetime.now() + timedelta(seconds=delay_seconds)
+        return now_utc() + timedelta(seconds=delay_seconds)
 
 
 class UsageLimitRetryInfo(BaseModel):
     """Enhanced usage limit info with retry strategy."""
 
     message: str = Field(..., description="The usage limit message from Claude")
-    detected_at: datetime = Field(default_factory=datetime.now)
+    detected_at: datetime = Field(default_factory=now_utc)
 
     # Parsed retry time from message (if available)
     parsed_retry_time: datetime | None = Field(default=None)
@@ -115,7 +117,7 @@ class UsageLimitRetryInfo(BaseModel):
             self.use_fallback = True
             self.fallback_reason = "Could not parse retry time from message"
             self.calculated_retry_time = self.retry_strategy.get_next_retry_time()
-        elif retry_time < datetime.now():
+        elif retry_time < now_utc():
             self.use_fallback = True
             self.fallback_reason = "Parsed time is in the past"
             self.calculated_retry_time = self.retry_strategy.get_next_retry_time()
