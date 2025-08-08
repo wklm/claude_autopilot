@@ -101,6 +101,7 @@ class FlutterAgentMonitor:
         # Health monitoring
         self.health_monitor = AgentHealthMonitor(check_interval_seconds=30, unhealthy_threshold=3)
         self.restart_tracker = RestartAttemptTracker(max_attempts=5, cooldown_seconds=300, attempt_window_seconds=3600)
+        self.restart_limit_hit = False  # Track when restart limit has been hit
 
         # Watchdog timer for hung detection
         self.watchdog = WatchdogTimer(
@@ -342,6 +343,9 @@ class FlutterAgentMonitor:
         can_restart, reason = self.restart_tracker.can_restart()
         if not can_restart:
             console.print(f"[red]Cannot restart: {reason}[/red]")
+            # Set flag if we hit the restart limit
+            if "Maximum restart attempts" in reason:
+                self.restart_limit_hit = True
             return
 
         console.print("[cyan]Restarting Claude agent...[/cyan]")
@@ -725,7 +729,7 @@ class FlutterAgentMonitor:
                             console.print("[dim]Agent task completed, now ready[/dim]")
                             
                             # Check if we should restart on complete
-                            if self.settings.restart_on_complete:
+                            if self.settings.restart_on_complete and not self.restart_limit_hit:
                                 console.print("[yellow]Task completed, restarting due to restart_on_complete setting...[/yellow]")
                                 self.restart_agent()
                                 self.last_ready_time = None  # Reset
@@ -768,6 +772,13 @@ class FlutterAgentMonitor:
 
                     # Update display
                     live.update(self.get_status_display())
+
+                    # Check if restart window has expired and reset flag if needed
+                    if self.restart_limit_hit:
+                        can_restart, _ = self.restart_tracker.can_restart()
+                        if can_restart:
+                            self.restart_limit_hit = False
+                            console.print("[green]Restart window expired, restart capability restored[/green]")
 
                     # Wait before next check
                     time.sleep(self.settings.check_interval)
