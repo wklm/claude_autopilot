@@ -339,8 +339,13 @@ class FlutterAgentMonitor:
 
     def restart_agent(self) -> None:
         """Restart the Claude agent with health checks."""
-        # Check if restart is allowed
+        # First check if restart window has expired and reset flag if needed
         can_restart, reason = self.restart_tracker.can_restart()
+        if can_restart and self.restart_limit_hit:
+            self.restart_limit_hit = False
+            console.print("[green]Restart window expired, restart capability restored[/green]")
+        
+        # Check if restart is allowed
         if not can_restart:
             console.print(f"[red]Cannot restart: {reason}[/red]")
             # Set flag if we hit the restart limit
@@ -466,6 +471,12 @@ class FlutterAgentMonitor:
                 table.add_row("Wait Remaining", f"{int(wait_remaining)} seconds")
 
         table.add_row("Project", str(self.settings.project_path))
+        
+        # Show restart limit status
+        if self.restart_limit_hit:
+            can_restart, reason = self.restart_tracker.can_restart()
+            if not can_restart:
+                table.add_row("Restart Status", f"[red]Disabled: {reason}[/red]")
 
         return table
 
@@ -700,9 +711,13 @@ class FlutterAgentMonitor:
                     timed_out, timeout_reason = self.watchdog.check_timeout()
                     if timed_out:
                         console.print(f"[red]Watchdog timeout: {timeout_reason}[/red]")
-                        console.print("[yellow]Agent appears to be hung. Forcing restart...[/yellow]")
-                        self.restart_agent()
-                        self.watchdog.start()  # Reset watchdog after restart
+                        if self.restart_limit_hit:
+                            console.print("[yellow]Cannot restart: Restart limit reached. Continuing to monitor...[/yellow]")
+                            self.watchdog.start()  # Reset watchdog to prevent repeated triggers
+                        else:
+                            console.print("[yellow]Agent appears to be hung. Forcing restart...[/yellow]")
+                            self.restart_agent()
+                            self.watchdog.start()  # Reset watchdog after restart
                         continue
 
                     # Handle status changes
@@ -772,13 +787,6 @@ class FlutterAgentMonitor:
 
                     # Update display
                     live.update(self.get_status_display())
-
-                    # Check if restart window has expired and reset flag if needed
-                    if self.restart_limit_hit:
-                        can_restart, _ = self.restart_tracker.can_restart()
-                        if can_restart:
-                            self.restart_limit_hit = False
-                            console.print("[green]Restart window expired, restart capability restored[/green]")
 
                     # Wait before next check
                     time.sleep(self.settings.check_interval)
