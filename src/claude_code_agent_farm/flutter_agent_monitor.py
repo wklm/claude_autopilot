@@ -754,7 +754,7 @@ class FlutterAgentMonitor:
                             console.print(f"[dim]Agent idle for {int(idle_seconds)}s[/dim]")
                         
                         # If idle for too long, restart
-                        if idle_seconds > self.settings.idle_timeout:
+                        if idle_seconds > self.settings.idle_timeout and not self.restart_limit_hit:
                             console.print(f"[yellow]Agent idle for {int(idle_seconds)}s (>{self.settings.idle_timeout}s). Restarting...[/yellow]")
                             self.restart_agent()
                             self.last_ready_time = None  # Reset
